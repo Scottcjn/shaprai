@@ -61,3 +61,9 @@ include = ["shaprai*"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: live integration tests against real services",
+]

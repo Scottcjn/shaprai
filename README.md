@@ -26,6 +26,18 @@ operate within a biblical ethical framework.
 pip install shaprai
 ```
 
+## Testing
+
+```bash
+# Fast mock-mode tests (CI-safe)
+pytest tests/integration/test_elyan_bus.py -v
+
+# Live integration smoke tests
+LIVE_ELYAN_TESTS=1 pytest -m integration tests/integration/test_elyan_bus.py -v
+```
+
+Mock mode uses monkeypatched network calls and is safe for CI. Live mode is opt-in and intended for real endpoint verification.
+
 ## Usage
 
 ```bash
