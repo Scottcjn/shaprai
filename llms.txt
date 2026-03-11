@@ -1,4 +1,4 @@
-# ShaprAI
+# ShaprAI (v0.1.0)
 > Agent lifecycle management platform by Elyan Labs. Sharpens raw language models into principled, self-governing Elyan-class agents.
 
 ## What ShaprAI Does
@@ -6,6 +6,10 @@
 ShaprAI takes raw language models and produces Elyan-class agents -- principled, self-governing AI agents of any size that maintain identity coherence, resist sycophancy, and operate within a biblical ethical framework. It manages the full agent lifecycle from creation through training, education, graduation, and deployment.
 
 Lifecycle: CREATED -> TRAINING (SFT -> DPO -> DriftLock) -> SANCTUARY -> GRADUATED -> DEPLOYED
+
+## A2A Agent Card
+ShaprAI provides a standard A2A Agent Card at:
+- `/.well-known/agent.json`
 
 ## Prerequisites (REQUIRED, not optional)
 

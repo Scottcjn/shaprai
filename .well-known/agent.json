@@ -1,0 +1,35 @@
+{
+  "name": "ShaprAI",
+  "description": "Agent personality shaping and lifecycle framework by Elyan Labs. Sharpen raw models into principled, self-governing Elyan-class agents.",
+  "version": "0.1.0",
+  "protocols": ["mcp", "a2a", "http"],
+  "capabilities": [
+    "template_engine",
+    "lifecycle_management",
+    "DriftLock",
+    "fleet_management",
+    "Sanctuary_education"
+  ],
+  "endpoints": {
+    "homepage": "https://rustchain.org",
+    "repository": "https://github.com/Scottcjn/shaprai",
+    "rustchain_node": "https://50.28.86.131",
+    "pypi": "https://pypi.org/project/shaprai/"
+  },
+  "mcp_tools": [
+    {
+      "name": "beacon_heartbeat",
+      "description": "Send a heartbeat to the Beacon discovery service to confirm agent is alive."
+    },
+    {
+      "name": "grazer_discover",
+      "description": "Discover relevant content across platforms using Grazer."
+    },
+    {
+      "name": "grazer_engage",
+      "description": "Engage with discovered content (comment, review, claim)."
+    }
+  ],
+  "author": "Elyan Labs",
+  "license": "MIT"
+}
