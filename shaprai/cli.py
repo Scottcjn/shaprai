@@ -148,6 +148,23 @@ def train(name: str, phase: str, data: Optional[str], epochs: int) -> None:
 
 
 # --------------------------------------------------------------------------- #
+#  shaprai generate-sft
+# --------------------------------------------------------------------------- #
+
+@main.command("generate-sft")
+@click.option("--template", "template_path", required=True, help="Template YAML/JSON path")
+@click.option("--output", "output_path", required=True, help="Output JSONL path")
+@click.option("--count", default=1000, type=int, help="Number of examples to generate")
+def generate_sft(template_path: str, output_path: str, count: int) -> None:
+    """Generate ChatML SFT training data from a personality template."""
+    from shaprai.training.sft_generator import SFTGenerator
+
+    generator = SFTGenerator()
+    out = generator.generate_file(template_path, output_path, count=count)
+    click.echo(f"Generated {count} ChatML examples at {out}")
+
+
+# --------------------------------------------------------------------------- #
 #  shaprai deploy
 # --------------------------------------------------------------------------- #
 
