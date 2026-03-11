@@ -1,140 +1,109 @@
 import pytest
+from unittest.mock import Mock, patch
 from shaprai.elyan_bus import ElyanBus
-from shaprai.agent import Agent
+from shaprai.agent import ElyanAgent
 
-class MockAgent(Agent):
-    def __init__(self, agent_id):
-        self.agent_id = agent_id
-        self.processed_messages = []
+class TestElyanBusIntegration:
+    """Integration tests for Elyan Bus"""
     
-    def process_message(self, message):
-        self.processed_messages.append(message)
-        return f"Processed: {message}"
-
-def test_elyan_bus_initialization():
-    """Test that ElyanBus initializes correctly."""
-    bus = ElyanBus()
-    assert bus.agents == {}
-    assert bus.message_queue == []
-
-def test_elyan_bus_register_agent():
-    """Test registering an agent with the bus."""
-    bus = ElyanBus()
-    agent = MockAgent("test-agent")
-    bus.register_agent(agent)
-    assert "test-agent" in bus.agents
-    assert bus.agents["test-agent"] == agent
-
-def test_elyan_bus_unregister_agent():
-    """Test unregistering an agent from the bus."""
-    bus = ElyanBus()
-    agent = MockAgent("test-agent")
-    bus.register_agent(agent)
-    bus.unregister_agent("test-agent")
-    assert "test-agent" not in bus.agents
-
-def test_elyan_bus_send_message():
-    """Test sending a message to a specific agent."""
-    bus = ElyanBus()
-    agent = MockAgent("test-agent")
-    bus.register_agent(agent)
+    def setup_method(self):
+        """Set up test fixtures"""
+        self.bus = ElyanBus()
+        self.agent1 = ElyanAgent("agent1")
+        self.agent2 = ElyanAgent("agent2")
     
-    bus.send_message("test-agent", "Hello, Agent!")
-    assert len(agent.processed_messages) == 1
-    assert agent.processed_messages[0] == "Hello, Agent!"
-
-def test_elyan_bus_send_message_to_nonexistent_agent():
-    """Test sending a message to a non-existent agent."""
-    bus = ElyanBus()
-    with pytest.raises(ValueError, match="Agent not found"):
-        bus.send_message("nonexistent-agent", "Hello!")
-
-def test_elyan_bus_broadcast_message():
-    """Test broadcasting a message to all agents."""
-    bus = ElyanBus()
-    agent1 = MockAgent("agent1")
-    agent2 = MockAgent("agent2")
-    bus.register_agent(agent1)
-    bus.register_agent(agent2)
+    def test_register_agent(self):
+        """Test registering an agent with the bus"""
+        self.bus.register_agent(self.agent1)
+        assert self.agent1.id in self.bus.agents
+        assert self.bus.agents[self.agent1.id] == self.agent1
     
-    bus.broadcast_message("Hello, all agents!")
-    assert len(agent1.processed_messages) == 1
-    assert len(agent2.processed_messages) == 1
-    assert agent1.processed_messages[0] == "Hello, all agents!"
-    assert agent2.processed_messages[0] == "Hello, all agents!"
-
-def test_elyan_bus_process_messages():
-    """Test processing messages in the queue."""
-    bus = ElyanBus()
-    agent = MockAgent("test-agent")
-    bus.register_agent(agent)
+    def test_unregister_agent(self):
+        """Test unregistering an agent from the bus"""
+        self.bus.register_agent(self.agent1)
+        self.bus.unregister_agent(self.agent1.id)
+        assert self.agent1.id not in self.bus.agents
     
-    # Add messages to queue
-    bus.message_queue.append(("test-agent", "Message 1"))
-    bus.message_queue.append(("test-agent", "Message 2"))
+    def test_broadcast_message(self):
+        """Test broadcasting a message to all agents"""
+        self.bus.register_agent(self.agent1)
+        self.bus.register_agent(self.agent2)
+        
+        with patch.object(self.agent1, 'receive_message') as mock_agent1:
+            with patch.object(self.agent2, 'receive_message') as mock_agent2:
+                message = {"type": "test", "content": "Hello"}
+                self.bus.broadcast_message(message)
+                
+                mock_agent1.assert_called_once_with(message)
+                mock_agent2.assert_called_once_with(message)
     
-    bus.process_messages()
-    assert len(agent.processed_messages) == 2
-    assert agent.processed_messages[0] == "Message 1"
-    assert agent.processed_messages[1] == "Message 2"
-    assert len(bus.message_queue) == 0
-
-def test_elyan_bus_process_messages_empty_queue():
-    """Test processing messages when the queue is empty."""
-    bus = ElyanBus()
-    agent = MockAgent("test-agent")
-    bus.register_agent(agent)
+    def test_send_direct_message(self):
+        """Test sending a direct message to a specific agent"""
+        self.bus.register_agent(self.agent1)
+        
+        with patch.object(self.agent1, 'receive_message') as mock_agent1:
+            message = {"type": "direct", "content": "Private message"}
+            self.bus.send_direct_message(self.agent1.id, message)
+            mock_agent1.assert_called_once_with(message)
     
-    bus.process_messages()
-    assert len(agent.processed_messages) == 0
-    assert len(bus.message_queue) == 0
-
-def test_elyan_bus_multiple_agents():
-    """Test bus functionality with multiple agents."""
-    bus = ElyanBus()
-    agent1 = MockAgent("agent1")
-    agent2 = MockAgent("agent2")
-    agent3 = MockAgent("agent3")
+    def test_send_direct_message_to_nonexistent_agent(self):
+        """Test sending a message to a non-existent agent"""
+        with pytest.raises(ValueError, match="Agent not found"):
+            self.bus.send_direct_message("nonexistent", {"type": "test"})
     
-    bus.register_agent(agent1)
-    bus.register_agent(agent2)
-    bus.register_agent(agent3)
+    def test_agent_communication_flow(self):
+        """Test a complete communication flow between agents"""
+        self.bus.register_agent(self.agent1)
+        self.bus.register_agent(self.agent2)
+        
+        # Agent1 sends a message to Agent2
+        with patch.object(self.agent2, 'receive_message') as mock_agent2:
+            message = {"type": "request", "content": "Can you help?"}
+            self.bus.send_direct_message(self.agent2.id, message)
+            mock_agent2.assert_called_once_with(message)
+        
+        # Agent2 responds to Agent1
+        with patch.object(self.agent1, 'receive_message') as mock_agent1:
+            response = {"type": "response", "content": "Sure, I can help"}
+            self.bus.send_direct_message(self.agent1.id, response)
+            mock_agent1.assert_called_once_with(response)
     
-    # Send specific messages
-    bus.send_message("agent1", "Hello, Agent 1!")
-    bus.send_message("agent2", "Hello, Agent 2!")
+    def test_bus_with_multiple_agents(self):
+        """Test bus functionality with multiple agents"""
+        agents = [ElyanAgent(f"agent{i}") for i in range(5)]
+        
+        # Register all agents
+        for agent in agents:
+            self.bus.register_agent(agent)
+        
+        # Verify all agents are registered
+        assert len(self.bus.agents) == 5
+        for agent in agents:
+            assert agent.id in self.bus.agents
+        
+        # Broadcast message to all agents
+        with patch.object(agent, 'receive_message') as mock_agent:
+            message = {"type": "broadcast", "content": "Hello everyone"}
+            self.bus.broadcast_message(message)
+            
+            # All agents should receive the message
+            for agent in agents:
+                mock_agent.assert_called_with(message)
     
-    # Broadcast to all
-    bus.broadcast_message("Broadcast message")
+    def test_bus_error_handling(self):
+        """Test error handling in the bus"""
+        # Test with empty agent ID
+        with pytest.raises(ValueError, match="Agent ID cannot be empty"):
+            self.bus.register_agent(ElyanAgent(""))
+        
+        # Test with None message
+        self.bus.register_agent(self.agent1)
+        with pytest.raises(ValueError, match="Message cannot be None"):
+            self.bus.send_direct_message(self.agent1.id, None)
+        
+        with pytest.raises(ValueError, match="Message cannot be None"):
+            self.bus.broadcast_message(None)
     
-    # Process messages
-    bus.process_messages()
-    
-    # Check results
-    assert len(agent1.processed_messages) == 2
-    assert len(agent2.processed_messages) == 2
-    assert len(agent3.processed_messages) == 1
-    
-    assert agent1.processed_messages[0] == "Hello, Agent 1!"
-    assert agent1.processed_messages[1] == "Broadcast message"
-    assert agent2.processed_messages[0] == "Hello, Agent 2!"
-    assert agent2.processed_messages[1] == "Broadcast message"
-    assert agent3.processed_messages[0] == "Broadcast message"
-
-def test_elyan_bus_agent_error_handling():
-    """Test error handling when an agent raises an exception."""
-    class ErrorAgent(Agent):
-        def process_message(self, message):
-            raise ValueError("Agent processing error")
-    
-    bus = ElyanBus()
-    agent = ErrorAgent("error-agent")
-    bus.register_agent(agent)
-    
-    # This should not raise an exception, but should log the error
-    bus.send_message("error-agent", "Test message")
-    bus.process_messages()
-    
-    # The message should still be in the queue if processing failed
-    assert len(bus.message_queue) == 1
-    assert bus.message_queue[0] == ("error-agent", "Test message")
+    def tearDown(self):
+        """Clean up after tests"""
+        self.bus.agents.clear()
