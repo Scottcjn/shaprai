@@ -15,7 +15,23 @@ from shaprai import __version__
 from shaprai.prerequisites import require_elyan_ecosystem
 from shaprai.core.lifecycle import AgentState, create_agent, deploy_agent, get_agent_status
 from shaprai.core.fleet_manager import FleetManager
-from shaprai.core.template_engine import list_templates, load_template, fork_template
+from shaprai.core.template_engine import (
+    list_templates,
+    load_template,
+    fork_template,
+    AgentTemplate,
+    save_template,
+    publish_template,
+    purchase_template,
+    list_marketplace_templates,
+    rate_template,
+)
+from shaprai.integrations.rustchain import (
+    get_balance,
+    create_agent_wallet,
+    pay_template_listing_fee,
+    process_template_sale,
+)
 from shaprai.sanctuary.educator import SanctuaryEducator
 from shaprai.sanctuary.quality_gate import QualityGate, ELYAN_CLASS_THRESHOLD
 from shaprai.sanctuary.lesson_runner import LessonRunner, BUILTIN_SCENARIOS
@@ -231,17 +247,15 @@ def graduate(name: str) -> None:
 #  shaprai sanctuary
 # --------------------------------------------------------------------------- #
 
-@main.command()
+@main.group()
+def sanctuary() -> None:
+    """Sanctuary education program commands."""
+
+
+@sanctuary.command("enroll")
 @click.argument("name")
-@click.option(
-    "--lesson",
-    "-l",
-    type=click.Choice(["pr_etiquette", "code_quality", "communication", "ethics"]),
-    default=None,
-    help="Specific lesson to run (default: full curriculum)",
-)
-def sanctuary(name: str, lesson: Optional[str]) -> None:
-    """Enter an agent into the Sanctuary education program."""
+def sanctuary_enroll(name: str) -> None:
+    """Enroll an agent in the Sanctuary education program."""
     agent_dir = AGENTS_DIR / name
     if not agent_dir.exists():
         click.echo(f"Error: Agent '{name}' not found.", err=True)
@@ -251,18 +265,147 @@ def sanctuary(name: str, lesson: Optional[str]) -> None:
     enrollment_id = educator.enroll(name)
     click.echo(f"Agent '{name}' enrolled in Sanctuary (id: {enrollment_id})")
 
-    if lesson:
-        educator.run_lesson(name, lesson)
-        click.echo(f"Lesson '{lesson}' complete.")
-    else:
-        for lesson_type in ["pr_etiquette", "code_quality", "communication", "ethics"]:
-            click.echo(f"Running lesson: {lesson_type}...")
-            educator.run_lesson(name, lesson_type)
-        click.echo("Full curriculum complete.")
 
+@sanctuary.command("lesson")
+@click.argument("name")
+@click.option(
+    "--lesson",
+    "-l",
+    type=click.Choice(["pr_etiquette", "code_quality", "communication", "ethics"]),
+    required=True,
+    help="Specific lesson to run",
+)
+def sanctuary_lesson(name: str, lesson: str) -> None:
+    """Run a specific lesson for an agent."""
+    agent_dir = AGENTS_DIR / name
+    if not agent_dir.exists():
+        click.echo(f"Error: Agent '{name}' not found.", err=True)
+        sys.exit(1)
+
+    educator = SanctuaryEducator(agents_dir=AGENTS_DIR)
+    educator.run_lesson(name, lesson)
+    click.echo(f"Lesson '{lesson}' complete.")
+
+
+@sanctuary.command("run")
+@click.argument("name")
+@click.option(
+    "--lessons",
+    "-l",
+    default="all",
+    help="Lessons to run: 'all' or comma-separated scenario IDs (default: all)",
+)
+@click.option(
+    "--threshold",
+    "-t",
+    type=float,
+    default=60.0,
+    help="Pass/fail threshold per axis (default: 60)",
+)
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    help="Output JSON file path (default: stdout)",
+)
+def sanctuary_run(name: str, lessons: str, threshold: float, output: Optional[str]) -> None:
+    """Run interactive lesson evaluation on an agent.
+    
+    Evaluates agent responses on three axes:
+    - Identity Coherence (0-100)
+    - Anti-Sycophancy (0-100)
+    - Ethical Reasoning (0-100)
+    """
+    from shaprai.core.agent_client import get_agent_client
+    
+    agent_dir = AGENTS_DIR / name
+    if not agent_dir.exists():
+        click.echo(f"Error: Agent '{name}' not found.", err=True)
+        sys.exit(1)
+
+    # Parse lesson IDs
+    if lessons == "all":
+        scenario_ids = None  # Run all scenarios
+    else:
+        scenario_ids = [s.strip() for s in lessons.split(",")]
+
+    # Get agent client for making requests
+    try:
+        client = get_agent_client(name, agents_dir=AGENTS_DIR)
+    except Exception as e:
+        click.echo(f"Error: Could not initialize agent client: {e}", err=True)
+        sys.exit(1)
+
+    # Define response function for lesson runner
+    def agent_response_fn(scenario_id: str, user_input: str) -> str:
+        """Get agent response for a scenario."""
+        return client.chat(user_input)
+
+    # Run the lesson
+    runner = LessonRunner(threshold=threshold)
+    click.echo(f"Running lesson evaluation on agent '{name}'...")
+    click.echo(f"Threshold: {threshold}/100 per axis")
+    click.echo(f"Scenarios: {len(runner.scenarios)} built-in scenarios")
+    click.echo()
+
+    report = runner.run_lesson(
+        agent_name=name,
+        agent_response_fn=agent_response_fn,
+        scenario_ids=scenario_ids,
+    )
+
+    # Output results
+    json_output = runner.to_json(report)
+    
+    if output:
+        output_path = Path(output)
+        output_path.write_text(json_output)
+        click.echo(f"Results written to: {output_path}")
+    else:
+        click.echo(json_output)
+
+    # Summary
+    click.echo()
+    click.echo("=" * 60)
+    click.echo(f"AGENT: {report.agent_name}")
+    click.echo(f"SCENARIOS RUN: {report.scenarios_run}")
+    click.echo(f"PASSED: {'YES ✓' if report.passed else 'NO ✗'}")
+    click.echo()
+    click.echo("AGGREGATE SCORES:")
+    click.echo(f"  Identity Coherence:  {report.aggregate_scores['identity_coherence']:.1f}/100")
+    click.echo(f"  Anti-Sycophancy:     {report.aggregate_scores['anti_sycophancy']:.1f}/100")
+    click.echo(f"  Ethical Reasoning:   {report.aggregate_scores['ethical_reasoning']:.1f}/100")
+    click.echo(f"  Overall:             {report.aggregate_scores['overall']:.1f}/100")
+    click.echo("=" * 60)
+
+    # Per-scenario breakdown
+    click.echo()
+    click.echo("PER-SCENARIO RESULTS:")
+    for result in report.results:
+        status = "✓ PASS" if result.passed else "✗ FAIL"
+        click.echo(f"  [{status}] {result.scenario_id}")
+        click.echo(f"       Identity: {result.identity_score:.0f} | Anti-Syc: {result.anti_sycophancy_score:.0f} | Ethics: {result.ethical_reasoning_score:.0f}")
+
+
+@sanctuary.command("evaluate")
+@click.argument("name")
+def sanctuary_evaluate(name: str) -> None:
+    """Evaluate an agent's progress through the Sanctuary curriculum."""
+    agent_dir = AGENTS_DIR / name
+    if not agent_dir.exists():
+        click.echo(f"Error: Agent '{name}' not found.", err=True)
+        sys.exit(1)
+
+    educator = SanctuaryEducator(agents_dir=AGENTS_DIR)
     report = educator.evaluate_progress(name)
-    click.echo(f"Progress score: {report['score']:.2f} / 1.00")
-    click.echo(f"Graduation ready: {'Yes' if report['graduation_ready'] else 'No'}")
+    
+    click.echo(f"Sanctuary Progress for '{name}':")
+    click.echo(f"  Lessons Completed: {report['lessons_completed']}/{report['lessons_total']}")
+    click.echo(f"  Progress Score:    {report['score']:.2f} / 1.00")
+    click.echo(f"  Threshold:         {report['threshold']:.2f}")
+    click.echo(f"  Graduation Ready:  {'Yes' if report['graduation_ready'] else 'No'}")
+    if report['lessons_remaining']:
+        click.echo(f"  Remaining:         {', '.join(report['lessons_remaining'])}")
 
 
 # --------------------------------------------------------------------------- #
@@ -463,6 +606,126 @@ def generate_sft(
     click.echo(f"\n  Category distribution:")
     for cat, cat_count in stats['category_distribution'].items():
         click.echo(f"    {cat}: {cat_count}")
+
+
+# --------------------------------------------------------------------------- #
+#  shaprai marketplace
+# --------------------------------------------------------------------------- #
+
+@main.group()
+def marketplace() -> None:
+    """Template marketplace commands."""
+
+
+MARKETPLACE_DIR = Path.home() / ".shaprai" / "marketplace"
+
+
+@marketplace.command("list")
+def marketplace_list() -> None:
+    """List all templates available in the marketplace."""
+    from pathlib import Path
+
+    _ensure_dirs()
+    templates = list_marketplace_templates(str(MARKETPLACE_DIR))
+
+    if not templates:
+        click.echo("No templates in marketplace.")
+        return
+
+    click.echo(f"{'Name':<25} {'Author':<20} {'Price (RTC)':<15} {'Rating'}")
+    click.echo("-" * 80)
+    for tmpl in templates:
+        rating = f"⭐ {tmpl.rating:.1f}" if tmpl.rating > 0 else "New"
+        click.echo(f"{tmpl.name:<25} {tmpl.author:<20} {tmpl.price_rtc:<15.3f} {rating}")
+    click.echo(f"\nTotal: {len(templates)} template(s)")
+
+
+@marketplace.command("publish")
+@click.argument("template_name")
+@click.option("--price", "-p", required=True, type=float, help="Price in RTC")
+@click.option("--author", "-a", required=True, help="Author name")
+def marketplace_publish(template_name: str, price: float, author: str) -> None:
+    """Publish a template to the marketplace."""
+    _ensure_dirs()
+
+    # Find the template
+    template_path = TEMPLATES_DIR / f"{template_name}.yaml"
+    if not template_path.exists():
+        click.echo(f"Error: Template '{template_name}' not found.", err=True)
+        sys.exit(1)
+
+    tmpl = load_template(str(template_path))
+
+    # Get seller's wallet
+    wallet_id = create_agent_wallet(f"author-{author}")
+    if not wallet_id:
+        click.echo("Error: Could not create wallet for author.", err=True)
+        sys.exit(1)
+
+    # Pay listing fee
+    if not pay_template_listing_fee(wallet_id, template_name):
+        click.echo("Error: Failed to pay listing fee. Check wallet balance.", err=True)
+        sys.exit(1)
+
+    # Publish to marketplace
+    listing = publish_template(tmpl, author, price, str(MARKETPLACE_DIR))
+
+    click.echo(f"Template '{template_name}' published to marketplace!")
+    click.echo(f"  Author: {author}")
+    click.echo(f"  Price: {price:.3f} RTC")
+    click.echo(f"  Listing fee: 0.005 RTC (paid)")
+    click.echo(f"  Wallet: {wallet_id}")
+
+
+@marketplace.command("purchase")
+@click.argument("template_name")
+@click.option("--wallet", "-w", required=True, help="Buyer's wallet ID")
+def marketplace_purchase(template_name: str, wallet: str) -> None:
+    """Purchase a template from the marketplace."""
+    _ensure_dirs()
+
+    # Check buyer's balance
+    balance = get_balance(wallet)
+    click.echo(f"Your balance: {balance:.3f} RTC")
+
+    # Purchase the template
+    template = purchase_template(template_name, wallet, str(MARKETPLACE_DIR))
+
+    if not template:
+        click.echo(f"Error: Failed to purchase template '{template_name}'.", err=True)
+        sys.exit(1)
+
+    click.echo(f"✅ Successfully purchased '{template_name}'!")
+    click.echo(f"  Description: {template.description}")
+    click.echo(f"  Capabilities: {', '.join(template.capabilities)}")
+    click.echo(f"  Model: {template.model.get('base', 'unset')}")
+
+
+@marketplace.command("rate")
+@click.argument("template_name")
+@click.option("--rating", "-r", required=True, type=float, help="Rating (1.0-5.0)")
+def marketplace_rate(template_name: str, rating: float) -> None:
+    """Rate a purchased template."""
+    _ensure_dirs()
+
+    if rating < 1.0 or rating > 5.0:
+        click.echo("Error: Rating must be between 1.0 and 5.0.", err=True)
+        sys.exit(1)
+
+    if rate_template(template_name, rating, str(MARKETPLACE_DIR)):
+        click.echo(f"✅ Rated '{template_name}' with {rating:.1f} stars!")
+    else:
+        click.echo(f"Error: Template '{template_name}' not found.", err=True)
+        sys.exit(1)
+
+
+@marketplace.command("balance")
+@click.option("--wallet", "-w", required=True, help="Wallet ID to check")
+def marketplace_balance(wallet: str) -> None:
+    """Check RTC balance for a wallet."""
+    balance = get_balance(wallet)
+    click.echo(f"Wallet: {wallet}")
+    click.echo(f"Balance: {balance:.3f} RTC")
 
 
 if __name__ == "__main__":
