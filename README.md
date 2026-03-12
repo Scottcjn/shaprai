@@ -74,3 +74,56 @@ All Elyan-class agents are built on the SophiaCore ethical framework:
 ## License
 
 MIT -- Copyright Elyan Labs 2026
+## Agent Card Deployment
+
+ShaprAI now includes an A2A (Agent-to-Agent) protocol Agent Card for programmatic discovery.
+
+### Files Added
+
+- `.well-known/agent.json` - A2A Agent Card following the standard specification
+- `.well-known/llms.txt` - LLM-discoverable documentation
+
+### Deployment Instructions
+
+To serve the agent card on your domain:
+
+1. **Static File Hosting**
+   Ensure your web server serves the `.well-known/` directory at the root of your domain:
+
+   ```nginx
+   # nginx example
+   location /.well-known/ {
+       alias /path/to/shaprai/.well-known/;
+   }
+   ```
+
+   ```apache
+   # Apache example
+   Alias /.well-known/ /path/to/shaprai/.well-known/
+   ```
+
+2. **Verify Deployment**
+   Test that the agent card is accessible:
+   ```bash
+   curl https://yourdomain.com/.well-known/agent.json
+   curl https://yourdomain.com/.well-known/llms.txt
+   ```
+
+3. **Validation**
+   The agent.json follows the A2A Protocol Specification. Validate against:
+   - https://google.github.io/A2A/
+   - Reference implementations: rustchain.org/.well-known/agent.json
+
+### Agent Card Contents
+
+The agent card includes:
+- Agent metadata (name, description, version)
+- Supported protocols (MCP, A2A, HTTP)
+- Capabilities list (template engine, lifecycle management, DriftLock, fleet management, Sanctuary)
+- Endpoint URLs
+- Authentication requirements
+- Documentation links
+
+### Bounty
+
+This implementation addresses issue #6: [Bounty: 30 RTC] Add .well-known/agent.json A2A Agent Card

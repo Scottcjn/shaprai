@@ -1,0 +1,58 @@
+# ShaprAI - Agent Personality Framework
+
+## Overview
+
+ShaprAI is a comprehensive framework for creating, evolving, and managing AI agent personalities. It provides structured templates, lifecycle management, and fleet orchestration capabilities.
+
+## Core Features
+
+### 1. Template Engine
+- Structured personality templates for consistent agent creation
+- Customizable traits, behaviors, and response patterns
+- Version-controlled personality definitions
+
+### 2. Lifecycle Management
+- Define and track agent evolution stages
+- Automated transitions between lifecycle phases
+- State persistence and recovery
+
+### 3. DriftLock
+- Embedding-based similarity detection
+- Monitor personality drift over time
+- Automated alerts for significant changes
+
+### 4. Fleet Management
+- Orchestrate multiple agents simultaneously
+- Coordinated behaviors across agent groups
+- Resource allocation and load balancing
+
+### 5. Sanctuary
+- Interactive lesson runner for agent training
+- Structured learning paths
+- Performance tracking and assessment
+
+## Protocols Supported
+
+- **MCP**: Model Context Protocol for tool integration
+- **A2A**: Agent-to-Agent protocol for inter-agent communication
+- **HTTP**: RESTful API for external integrations
+
+## Authentication
+
+API Key authentication required. Include `X-API-Key` header in all requests.
+
+## Documentation
+
+- GitHub: https://github.com/Scottcjn/shaprai
+- Issues: https://github.com/Scottcjn/shaprai/issues
+
+## Deployment
+
+To serve the agent card, ensure your web server serves static files from the `.well-known/` directory at the root of your domain.
+
+Example nginx configuration:
+```nginx
+location /.well-known/ {
+    alias /path/to/shaprai/.well-known/;
+}
+```

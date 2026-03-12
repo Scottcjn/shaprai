@@ -1,0 +1,55 @@
+{
+  "name": "ShaprAI",
+  "description": "Agent personality shaping and lifecycle framework - Create, evolve, and manage AI agent personalities with structured templates, lifecycle management, and fleet orchestration",
+  "version": "0.1.0",
+  "protocols": ["mcp", "a2a", "http"],
+  "capabilities": [
+    {
+      "name": "template_engine",
+      "description": "Structured personality templates for agent creation"
+    },
+    {
+      "name": "lifecycle_management",
+      "description": "Manage agent evolution through defined lifecycle stages"
+    },
+    {
+      "name": "driftlock",
+      "description": "Embedding-based similarity detection for personality drift"
+    },
+    {
+      "name": "fleet_management",
+      "description": "Orchestrate multiple agents with coordinated behaviors"
+    },
+    {
+      "name": "sanctuary",
+      "description": "Interactive lesson runner for agent training"
+    }
+  ],
+  "endpoints": {
+    "mcp": {
+      "url": "/mcp",
+      "protocol": "mcp"
+    },
+    "a2a": {
+      "url": "/a2a",
+      "protocol": "a2a"
+    },
+    "http": {
+      "url": "/api/v1",
+      "protocol": "http"
+    }
+  },
+  "authentication": {
+    "type": "api_key",
+    "location": "header",
+    "name": "X-API-Key"
+  },
+  "documentation": {
+    "url": "https://github.com/Scottcjn/shaprai#readme",
+    "llms_txt": "/.well-known/llms.txt"
+  },
+  "contact": {
+    "email": "scott@example.com",
+    "github": "https://github.com/Scottcjn/shaprai"
+  }
+}
