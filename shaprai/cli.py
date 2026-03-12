@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import sys
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -239,14 +240,19 @@ def graduate(name: str) -> None:
         click.echo(f"Agent '{name}' has GRADUATED to Elyan-class status.")
     else:
         click.echo(f"Agent '{name}' did not meet graduation requirements.", err=True)
-        click.echo("Run 'shaprai sanctuary' for additional education.")
+        click.echo("Run 'shaprai sanctuary enroll' for additional education.")
 
 
 # --------------------------------------------------------------------------- #
 #  shaprai sanctuary
 # --------------------------------------------------------------------------- #
 
-@main.command()
+@main.group()
+def sanctuary() -> None:
+    """Sanctuary education commands."""
+
+
+@sanctuary.command("enroll")
 @click.argument("name")
 @click.option(
     "--lesson",
@@ -255,7 +261,7 @@ def graduate(name: str) -> None:
     default=None,
     help="Specific lesson to run (default: full curriculum)",
 )
-def sanctuary(name: str, lesson: Optional[str]) -> None:
+def sanctuary_enroll(name: str, lesson: Optional[str]) -> None:
     """Enter an agent into the Sanctuary education program."""
     agent_dir = AGENTS_DIR / name
     if not agent_dir.exists():
@@ -278,6 +284,19 @@ def sanctuary(name: str, lesson: Optional[str]) -> None:
     report = educator.evaluate_progress(name)
     click.echo(f"Progress score: {report['score']:.2f} / 1.00")
     click.echo(f"Graduation ready: {'Yes' if report['graduation_ready'] else 'No'}")
+
+
+@sanctuary.command("run")
+@click.option("--agent", "agent_template", required=True, help="Agent template YAML/JSON path")
+@click.option("--lessons", default="all", help="Lesson set to run (default: all)")
+@click.option("--threshold", default=60, type=int, help="Pass threshold per axis")
+def sanctuary_run(agent_template: str, lessons: str, threshold: int) -> None:
+    """Run interactive Sanctuary lessons against an agent template."""
+    from shaprai.sanctuary.lesson_runner import LessonRunner
+
+    runner = LessonRunner(threshold=threshold)
+    report = runner.run(agent_template, lessons=lessons, threshold=threshold)
+    click.echo(json.dumps(report, indent=2))
 
 
 # --------------------------------------------------------------------------- #
