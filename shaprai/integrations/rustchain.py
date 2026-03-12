@@ -15,6 +15,8 @@ import logging
 import time
 from typing import Any, Dict, Optional
 
+from shaprai.core.reputation import ReputationManager
+
 logger = logging.getLogger(__name__)
 
 # Default RustChain node endpoint
@@ -233,3 +235,36 @@ def check_graduation_fee(
     """
     balance = get_balance(wallet_id, rustchain_url)
     return balance >= GRADUATION_FEE
+
+
+def record_bounty_delivery(
+    agent_name: str,
+    job_id: str,
+    reward_rtc: float,
+    success: bool = True,
+) -> None:
+    """Record a bounty delivery event in the reputation system.
+
+    Args:
+        agent_name: Agent identifier.
+        job_id: Job/bounty identifier.
+        reward_rtc: Reward amount in RTC.
+        success: Whether the bounty was successfully delivered.
+    """
+    rm = ReputationManager()
+    event_type = "bounty_delivered" if success else "bounty_rejected"
+    
+    rm.record_event(
+        agent_name,
+        event_type,
+        details={
+            "job_id": job_id,
+            "reward_rtc": reward_rtc,
+            "success": success,
+        },
+    )
+    
+    if success:
+        logger.info("Bounty delivered: %s earned %.2f RTC", agent_name, reward_rtc)
+    else:
+        logger.warning("Bounty rejected: %s for job %s", agent_name, job_id)

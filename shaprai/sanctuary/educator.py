@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from shaprai.core.lifecycle import AgentState, transition_state, _load_manifest, _save_manifest
+from shaprai.core.reputation import ReputationManager
 from shaprai.sanctuary.quality_gate import QualityGate, ELYAN_CLASS_THRESHOLD
 from shaprai.sanctuary.principles import get_ethics_prompt, get_driftlock_anchors
 
@@ -253,4 +254,12 @@ class SanctuaryEducator:
         manifest["sanctuary"]["graduated_at"] = time.time()
 
         _save_manifest(name, manifest, self.agents_dir)
+
+        # Record graduation in reputation system
+        rm = ReputationManager()
+        rm.record_event(name, "graduation", details={
+            "graduated_at": manifest["sanctuary"]["graduated_at"],
+            "final_score": progress["score"],
+        })
+
         return True

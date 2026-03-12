@@ -16,6 +16,7 @@ from shaprai.prerequisites import require_elyan_ecosystem
 from shaprai.core.lifecycle import AgentState, create_agent, deploy_agent, get_agent_status
 from shaprai.core.fleet_manager import FleetManager
 from shaprai.core.template_engine import list_templates, load_template, fork_template
+from shaprai.core.reputation import ReputationManager
 from shaprai.sanctuary.educator import SanctuaryEducator
 from shaprai.sanctuary.quality_gate import QualityGate, ELYAN_CLASS_THRESHOLD
 
@@ -273,7 +274,8 @@ def fleet() -> None:
 
 
 @fleet.command("status")
-def fleet_status() -> None:
+@click.option("--with-rep", is_flag=True, help="Include reputation metrics")
+def fleet_status(with_rep: bool) -> None:
     """Show status of all managed agents."""
     fm = FleetManager(agents_dir=AGENTS_DIR)
     agents = fm.list_agents()
@@ -282,14 +284,33 @@ def fleet_status() -> None:
         click.echo("No agents managed. Run 'shaprai create' to get started.")
         return
 
-    click.echo(f"{'Name':<25} {'State':<15} {'Template':<20} {'Platforms'}")
-    click.echo("-" * 80)
-    for agent in agents:
-        platforms = ", ".join(agent.get("platforms", []))
-        click.echo(
-            f"{agent['name']:<25} {agent['state']:<15} {agent.get('template', 'unknown'):<20} {platforms}"
-        )
+    if with_rep:
+        rm = ReputationManager()
+        click.echo(f"{'Name':<25} {'State':<15} {'Rating':<10} {'Tasks':<10} {'Bounty (RTC)'}")
+        click.echo("-" * 80)
+        for agent in agents:
+            stats = rm.get_agent_stats(agent["name"])
+            rating_stars = '★' * int(round(stats['rating'])) + '☆' * (5 - int(round(stats['rating'])))
+            click.echo(
+                f"{agent['name']:<25} {agent['state']:<15} {rating_stars} {stats['total_tasks']:<10} {stats['bounty_earned']:.2f}"
+            )
+    else:
+        click.echo(f"{'Name':<25} {'State':<15} {'Template':<20} {'Platforms'}")
+        click.echo("-" * 80)
+        for agent in agents:
+            platforms = ", ".join(agent.get("platforms", []))
+            click.echo(
+                f"{agent['name']:<25} {agent['state']:<15} {agent.get('template', 'unknown'):<20} {platforms}"
+            )
     click.echo(f"\nTotal: {len(agents)} agent(s)")
+    
+    # Show fleet health summary
+    health = fm.get_fleet_health()
+    if "reputation" in health:
+        click.echo(f"\nFleet Reputation:")
+        click.echo(f"  Average Rating: {health['reputation']['average_rating']:.1f}/5.0")
+        click.echo(f"  Total Bounty Earned: {health['reputation']['total_bounty_earned']:.2f} RTC")
+        click.echo(f"  High Rep Agents (7.0+): {health['reputation']['high_reputation_agents']}")
 
 
 # --------------------------------------------------------------------------- #
@@ -361,6 +382,110 @@ def template_fork(source: str, new_name: str, model: Optional[str]) -> None:
 
     save_template(new_tmpl, str(new_path))
     click.echo(f"Template '{new_name}' forked from '{source}' at {new_path}")
+
+
+# --------------------------------------------------------------------------- #
+#  shaprai reputation
+# --------------------------------------------------------------------------- #
+
+@main.group()
+def reputation() -> None:
+    """Reputation system management."""
+
+
+@reputation.command("show")
+@click.argument("name")
+def reputation_show(name: str) -> None:
+    """Show reputation details for an agent."""
+    rm = ReputationManager()
+    stats = rm.get_agent_stats(name)
+
+    if not stats or stats["total_tasks"] == 0:
+        click.echo(f"No reputation data for agent '{name}' yet.")
+        return
+
+    click.echo(f"Reputation for '{name}':")
+    click.echo(f"  Total Score:    {stats['total_score']:.2f} / 10.0")
+    click.echo(f"  Rating:         {'★' * int(round(stats['rating']))}{'☆' * (5 - int(round(stats['rating'])))} ({stats['rating']:.1f}/5.0)")
+    click.echo(f"  Tasks:          {stats['successful_tasks']}/{stats['total_tasks']} ({stats['success_rate']*100:.1f}% success)")
+    click.echo(f"  Bounty Earned:  {stats['bounty_earned']:.2f} RTC")
+    click.echo(f"  Recent Trend:   {'+' if stats['recent_trend'] >= 0 else ''}{stats['recent_trend']:.2f}")
+    
+    # Show last 5 events
+    rep = rm.get_reputation(name)
+    if rep.events:
+        click.echo(f"\nRecent Events:")
+        for event in rep.events[-5:]:
+            event_type = event.event_type.replace('_', ' ').title()
+            delta_str = f"+{event.score_delta:.2f}" if event.score_delta >= 0 else f"{event.score_delta:.2f}"
+            click.echo(f"  • {event_type}: {delta_str}")
+
+
+@reputation.command("leaderboard")
+@click.option("--limit", "-l", default=10, type=int, help="Number of agents to show")
+def reputation_leaderboard(limit: int) -> None:
+    """Show top agents by reputation score."""
+    rm = ReputationManager()
+    leaderboard = rm.get_leaderboard(limit=limit)
+
+    if not leaderboard:
+        click.echo("No reputation data available yet.")
+        return
+
+    click.echo(f"{'Rank':<6} {'Agent':<25} {'Score':<10} {'Rating':<10} {'Tasks':<10} {'Bounty (RTC)'}")
+    click.echo("-" * 85)
+    for i, rep in enumerate(leaderboard, 1):
+        rating_stars = '★' * int(round(rep.rating)) + '☆' * (5 - int(round(rep.rating)))
+        click.echo(
+            f"{i:<6} {rep.agent_name:<25} {rep.total_score:<10.2f} {rating_stars} {rep.total_tasks:<10} {rep.bounty_earned:.2f}"
+        )
+
+
+@reputation.command("record")
+@click.argument("name")
+@click.option("--event", "-e", required=True, type=click.Choice([
+    "task_completed", "task_failed", "bounty_delivered", "bounty_rejected",
+    "positive_review", "negative_review", "quality_pr", "helpful_interaction",
+    "misconduct", "graduation"
+]), help="Event type to record")
+@click.option("--delta", "-d", default=None, type=float, help="Custom score delta")
+@click.option("--details", "-D", default=None, help="Event details (JSON string)")
+def reputation_record(name: str, event: str, delta: Optional[float], details: Optional[str]) -> None:
+    """Manually record a reputation event for an agent."""
+    import json
+    
+    rm = ReputationManager()
+    
+    event_details = None
+    if details:
+        try:
+            event_details = json.loads(details)
+        except json.JSONDecodeError:
+            click.echo(f"Error: Invalid JSON for details: {details}", err=True)
+            sys.exit(1)
+
+    score_delta = rm.record_event(name, event, details=event_details, custom_delta=delta)
+    click.echo(f"Recorded '{event}' for '{name}': {'+' if score_delta >= 0 else ''}{score_delta:.2f}")
+
+
+@reputation.command("reset")
+@click.argument("name")
+@click.confirmation_option(prompt="Are you sure you want to reset this agent's reputation?")
+def reputation_reset(name: str) -> None:
+    """Reset an agent's reputation to default values."""
+    rm = ReputationManager()
+    rm.reset_reputation(name)
+    click.echo(f"Reputation reset for '{name}'.")
+
+
+@reputation.command("export")
+@click.option("--output", "-o", default="reputation_export.json", help="Output file path")
+def reputation_export(output: str) -> None:
+    """Export all reputation data to JSON."""
+    rm = ReputationManager()
+    output_path = Path(output)
+    rm.export_all(output_path)
+    click.echo(f"Reputation data exported to {output_path}")
 
 
 if __name__ == "__main__":

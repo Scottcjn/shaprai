@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from shaprai.core.lifecycle import AgentState
+from shaprai.core.reputation import ReputationManager
 
 
 class FleetManager:
@@ -194,10 +195,30 @@ class FleetManager:
         else:
             health = "needs_attention"
 
+        # Get reputation metrics
+        rm = ReputationManager()
+        avg_rating = 0.0
+        total_bounty = 0.0
+        high_rep_count = 0
+
+        for agent in agents:
+            stats = rm.get_agent_stats(agent["name"])
+            avg_rating += stats.get("rating", 3.0)
+            total_bounty += stats.get("bounty_earned", 0.0)
+            if stats.get("total_score", 5.0) >= 7.0:
+                high_rep_count += 1
+
+        avg_rating = avg_rating / total if total > 0 else 0.0
+
         return {
             "total_agents": total,
             "by_state": by_state,
             "platforms": platforms,
             "active_ratio": round(active_ratio, 2),
             "health": health,
+            "reputation": {
+                "average_rating": round(avg_rating, 2),
+                "total_bounty_earned": round(total_bounty, 2),
+                "high_reputation_agents": high_rep_count,
+            },
         }
