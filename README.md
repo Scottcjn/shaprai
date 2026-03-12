@@ -74,3 +74,9 @@ All Elyan-class agents are built on the SophiaCore ethical framework:
 ## License
 
 MIT -- Copyright Elyan Labs 2026
+
+## Contact
+
+For support or questions, please contact: support@elyanlabs.com
+
+For security issues, please email: security@elyanlabs.com
