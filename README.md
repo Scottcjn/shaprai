@@ -71,6 +71,39 @@ All Elyan-class agents are built on the SophiaCore ethical framework:
 - **Anti-Sycophancy** -- Respectful disagreement is a virtue
 - **Hebbian Learning** -- Strengthen what works, prune what doesn't
 
+## A2A Agent Card
+
+ShaprAI publishes an A2A (Agent-to-Agent) protocol Agent Card at `.well-known/agent.json`. This enables other agents and platforms to discover ShaprAI's capabilities programmatically.
+
+### Deploying the Agent Card
+
+To serve the A2A Agent Card for your ShaprAI deployment:
+
+1. **Static Hosting**: Place the `.well-known/agent.json` file at the root of your static web server
+2. **Web Server Config**: Configure your web server to serve the file at `https://your-domain.com/.well-known/agent.json`
+3. **Verify**: Access the URL in a browser or via `curl` to confirm it's publicly accessible
+
+Example nginx configuration:
+```nginx
+location /.well-known/agent.json {
+    add_header Content-Type application/json;
+    add_header Access-Control-Allow-Origin *;
+    try_files $uri =404;
+}
+```
+
+### Agent Card Contents
+
+The Agent Card includes:
+- Agent name, description, and version
+- Supported protocols (MCP, A2A, HTTP)
+- Capabilities list (template engine, lifecycle management, DriftLock, fleet management, Sanctuary)
+- Authentication requirements
+- Endpoint URLs
+- Available MCP tools
+
+For more details on the A2A Protocol, see the [A2A Specification](https://google.github.io/A2A/).
+
 ## License
 
 MIT -- Copyright Elyan Labs 2026
