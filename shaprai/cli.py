@@ -18,6 +18,7 @@ from shaprai.core.fleet_manager import FleetManager
 from shaprai.core.template_engine import list_templates, load_template, fork_template
 from shaprai.sanctuary.educator import SanctuaryEducator
 from shaprai.sanctuary.quality_gate import QualityGate, ELYAN_CLASS_THRESHOLD
+from shaprai.sanctuary.lesson_runner import LessonRunner, BUILTIN_SCENARIOS
 from shaprai.training.sft_generator import SFTDataGenerator, load_agent_template
 
 
