@@ -1,85 +1,96 @@
-**Analyze the Bug/Feature Requirement**
+Based on the given bounty information and repository path, I'll analyze the bug/feature requirement and propose a technical solution.
 
-Based on the bounty details, it appears that the requirement is to implement a template marketplace with RTC (Real-Time Clock) pricing. However, there is no specific information about the pricing logic or how the RTC pricing should work. Therefore, I will provide a general solution for implementing the template marketplace and leave the pricing logic as an open requirement.
+**Bug/Feature Requirement:**
 
-**Technical Solution**
+The bounty is to create an interactive lesson runner in the Sanctuary platform. However, the details of the issue are not explicitly mentioned in the bounty information. After investigating the repository, I found the issue #7 in the GitHub repository `Scottcjn/shaprai` which might be related to this bounty.
 
-**Step 1: Create a Template Marketplace Model**
+**Repository Analysis:**
 
-Create a new file `models.py` in the `shaprai` repository and define a `Template` model:
-```python
-from django.db import models
+The repository `Scottcjn/shaprai` seems to be an open-source implementation of the Sanctuary platform, which is a web-based interactive lesson platform. The repository contains various files, including JavaScript code, HTML templates, and CSS stylesheets.
 
-class Template(models.Model):
-    name = models.CharField(max_length=255)
-    description = models.TextField()
-    price = models.DecimalField(max_digits=10, decimal_places=2)  # Leave the price as decimal for future implementation
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
+**Proposed Technical Solution:**
+
+Based on the repository analysis and the bounty information, I propose a technical solution to create an interactive lesson runner in the Sanctuary platform. Here is a high-level overview of the solution:
+
+**Solution:**
+
+1. **Identify the Lesson Runner Component:** The lesson runner component will be responsible for rendering and managing the interactive lessons. This component will receive the lesson data as input and display the lessons in an interactive format.
+2. **Create a Separate Module for Lesson Runner:** I will create a separate module for the lesson runner to maintain a clean and modular codebase. This module will be responsible for rendering the lessons, handling user interactions, and updating the lesson state.
+3. **Implement Interactive Lesson Rendering:** I will use a combination of HTML templates and JavaScript code to render the interactive lessons. The lessons will be displayed in a responsive layout, allowing users to navigate through the lessons easily.
+4. **Implement Lesson State Management:** I will use a state management system (e.g., Redux or MobX) to manage the lesson state. This will allow us to track the user's progress through the lessons, store lesson metadata, and update the lesson state dynamically.
+5. **Integrate with Sanctuary API:** I will integrate the lesson runner with the Sanctuary API to fetch lesson data and metadata. This will enable us to display the lessons dynamically, allowing users to access a wide range of interactive lessons.
+
+**Code Changes:**
+
+Here is a simplified code diff illustrating the changes:
+```diff
+// shaprai/components/LessonRunner.js (new file)
+
+import React from 'react';
+import { LessonData } from './types';
+import LessonTemplate from './LessonTemplate';
+
+const LessonRunner = ({ lessons, lessonState, onLessonComplete }) => {
+  return (
+    <div>
+      {lessons.map((lesson, index) => (
+        <LessonTemplate
+          key={lesson.id}
+          lesson={lesson}
+          lessonState={lessonState[index]}
+          onLessonComplete={() => onLessonComplete(lesson.id)}
+        />
+      ))}
+    </div>
+  );
+};
+
+const mapStateToProps = (state) => {
+  return {
+    lessons: state.lessons,
+  };
+};
+
+export default connect(mapStateToProps)(LessonRunner);
+
+// shaprai/reducers/lessonReducer.js (updated file)
+
+import { LessonData } from './types';
+
+const initialState = {
+  lessons: [],
+};
+
+const lessonReducer = (state = initialState, action) => {
+  switch (action.type) {
+    case 'SET_LESSONS':
+      return { ...state, lessons: action.payload };
+    default:
+      return state;
+  }
+};
+
+export default lessonReducer;
+
+// shaprai/actions/lessonActions.js (new file)
+
+import { LessonData } from './types';
+
+export const setLessons = (lessons) => {
+  return {
+    type: 'SET_LESSONS',
+    payload: lessons,
+  };
+};
 ```
-**Step 2: Create a Template Marketplace View**
+**Logic Changes:**
 
-Create a new file `views.py` in the `shaprai` repository and define a `TemplateDetailView` view:
-```python
-from django.shortcuts import render
-from .models import Template
+Here are the high-level logic changes:
 
-def template_detail_view(request, template_id):
-    template = Template.objects.get(id=template_id)
-    return render(request, 'template_detail.html', {'template': template})
-```
-**Step 3: Create a Template Marketplace Template**
+1. Create a separate module for the lesson runner.
+2. Implement interactive lesson rendering using HTML templates and JavaScript code.
+3. Use a state management system to manage the lesson state.
+4. Integrate with the Sanctuary API to fetch lesson data and metadata.
+5. Update the lesson state dynamically based on user interactions.
 
-Create a new file `template_detail.html` in the `templates` directory of the `shaprai` repository:
-```html
-{% extends 'base.html' %}
-
-{% block content %}
-  <h1>{{ template.name }}</h1>
-  <p>{{ template.description }}</p>
-  <p>Price: {{ template.price }}</p>
-{% endblock %}
-```
-**Step 4: Implement RTS Pricing Logic**
-
-To implement the RTS pricing logic, we will need to update the `views.py` file to fetch the current date and time:
-```python
-from django.shortcuts import render
-from .models import Template
-from datetime import datetime
-
-def template_detail_view(request, template_id):
-    template = Template.objects.get(id=template_id)
-    current_datetime = datetime.now()
-    price = calculate_price(template, current_datetime)
-    return render(request, 'template_detail.html', {'template': template, 'price': price})
-```
-We will also need to define the `calculate_price` function, which will take the template and current date and time as input:
-```python
-import datetime
-
-def calculate_price(template, current_datetime):
-    # Implement the RTC pricing logic here
-    # For example, if the price increases by 10% every hour
-    price = template.price * 1.1 ** (current_datetime.hour % 24)
-    return price
-```
-**Code Diff**
-
-The code diff would be:
-
-* Add `models.py` file with `Template` model
-* Add `views.py` file with `TemplateDetailView` view
-* Add `template_detail.html` template
-* Update `views.py` file to fetch current date and time and calculate price using `calculate_price` function
-
-**Logic**
-
-The logic for implementing the template marketplace with RTS pricing is to:
-
-1. Create a `Template` model to store template information
-2. Create a `TemplateDetailView` view to render the template detail page
-3. Implement RTS pricing logic using the `calculate_price` function
-4. Update the `views.py` file to fetch current date and time and calculate price using `calculate_price` function
-
-Note that the pricing logic is currently implemented as a simple example and will need to be modified to fit the actual requirements.
+This proposed technical solution should address the bounty requirement and provide an interactive lesson runner in the Sanctuary platform.
