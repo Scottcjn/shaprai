@@ -1,0 +1,83 @@
+{
+  "$schema": "https://a2a-protocol.org/schemas/agent-card-v1.json",
+  "version": "1.0",
+  "agent": {
+    "id": "shaprai",
+    "name": "ShaprAI",
+    "type": "agent-sharpener",
+    "description": "Agent Sharpener by Elyan Labs. Transforms raw language models into principled, self-governing Elyan-class agents.",
+    "capabilities": [
+      "agent-creation",
+      "agent-training",
+      "sft-training",
+      "dpo-training",
+      "driftlock-monitoring",
+      "ethics-enforcement",
+      "identity-coherence",
+      "self-governance"
+    ],
+    "platform": "python",
+    "repository": "https://github.com/Scottcjn/shaprai",
+    "documentation": "https://github.com/Scottcjn/shaprai/blob/main/README.md",
+    "license": "MIT"
+  },
+  "endpoints": {
+    "api": {
+      "base_url": "https://api.shaprai.io",
+      "version": "v1",
+      "authentication": "api-key"
+    }
+  },
+  "contact": {
+    "maintainer": "Elyan Labs",
+    "email": "hello@elyanlabs.com",
+    "github": "https://github.com/Scottcjn"
+  },
+  "dependencies": {
+    "required": [
+      "beacon-skill",
+      "grazer-skill",
+      "atlas"
+    ],
+    "optional": [
+      "rustchain-wallet"
+    ]
+  },
+  "standards": {
+    "bcos": "certified",
+    "a2a": "v1.0"
+  },
+  "integrations": {
+    "models": [
+      "Qwen/Qwen3-7B-Instruct",
+      "meta-llama/Llama-3-8B-Instruct",
+      "mistralai/Mistral-7B-Instruct-v0.2"
+    ],
+    "platforms": [
+      "github",
+      "bottube",
+      "moltbook"
+    ]
+  },
+  "ethics": {
+    "framework": "sophiacore",
+    "principles": [
+      "identity-coherence",
+      "anti-sycophancy",
+      "biblical-ethics",
+      "self-governance"
+    ]
+  },
+  "training": {
+    "phases": [
+      "sft",
+      "dpo",
+      "driftlock"
+    ],
+    "sanctuary_enabled": true
+  },
+  "tokens": {
+    "bounty_currency": "RTC",
+    "blockchain": "rustchain"
+  }
+}
