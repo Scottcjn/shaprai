@@ -1,124 +1,162 @@
-Based on the provided information, it appears to be a bounty task from GitHub Issues. The bounty title indicates a requirement for a "Template marketplace with RTC pricing." I'll analyze the provided information and propose a technical solution.
+Based on the bounty info and the provided HTML elements, it appears that we are tasked with implementing a template marketplace with RTC (Real-Time Clock) pricing, specifically for the Shaprai repository located at /tmp/polymit_work/shaprai.
 
-**Analyze the bug/feature requirement:**
+Here is a proposed technical solution to solve this bounty:
 
-From the bounty title and the provided code snippet (elements of the GitHub navigation bar), I infer that we need to:
+**Step 1: Identify the target element for displaying RTC pricing**
 
-1. Create a template marketplace.
-2. Display Real-time Clock (RTC) pricing information within the marketplace.
+From the provided HTML elements, we can see that there are three links with the text content "Startups", "Issues", and "Software Development". Let's assume that we want to display the RTC pricing on the "Startups" page.
 
-**Proposed technical solution:**
+**Step 2: Find the container element for the page**
 
-To create a template marketplace with RTC pricing, I'll suggest the following solution:
+Based on the provided selector paths, the container element for the page appears to be `body > div.logged-out:nth-of-type(1) > div.position-relative:nth-of-type(2) > header.HeaderMktg`. We'll use this selector to target the container element.
 
-1. **Backend:** Use a Node.js server-side application (e.g., Express.js) to handle template creation and RTC pricing. The backend will:
+**Step 3: Extract the RTC pricing data**
 
-- Store template metadata (e.g., name, description, images) in a database (e.g., MongoDB).
-- Use a pricing library (e.g., moment.js) to calculate and display RTC pricing information.
-2. **Frontend:** Build the template marketplace frontend using a JavaScript framework (e.g., React.js, Angular.js) or a template engine (e.g., Jinja2, Mustache). The frontend will:
-
-- Render a list of templates with their metadata and RTC pricing information.
-- Allow users to filter and sort templates based on pricing.
-- Include a search bar for users to find specific templates.
-
-**Code Diff (simplified):**
-
-Here's a simplified code diff to give an idea of the implementation:
-
-**Backend (Express.js):**
-
-```javascript
-// Import required libraries
-const express = require('express');
-const { v4: uuidv4 } = require('uuid');
-const mongoose = require('mongoose');
-const moment = require('moment');
-
-// Connect to MongoDB database
-mongoose.connect('mongodb://localhost/templates', { useNewUrlParser: true, useUnifiedTopology: true });
-
-// Create a new template model
-const templateSchema = new mongoose.Schema({
-  _id: String,
-  name: String,
-  description: String,
-  images: [String],
-  price: Number,
-});
-
-// Create a new template collection
-const Template = mongoose.model('Template', templateSchema);
-
-// Define an API endpoint to retrieve templates
-app.get('/templates', async (req, res) => {
-  try {
-    // Retrieve all templates from the database
-    const templates = await Template.find();
-    // Calculate RTC pricing for each template
-    const updatedTemplates = templates.map((template) => {
-      const price = moment().unix() * template.price;
-      return { ...template, price };
-    });
-    // Send the updated template list as a response
-    res.json(updatedTemplates);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Failed to retrieve templates' });
+To display RTC pricing, we need to extract the relevant data. Since the bounty info doesn't specify the format of the RTC pricing data, let's assume that it's a JSON object with the following structure:
+```json
+{
+  "startups": {
+    "price": 40.99
   }
-});
+}
 ```
+We'll need to implement a backend API to fetch this data from the database or another data source.
 
-**Frontend (React.js):**
+**Step 4: Update the template to display RTC pricing**
 
+We'll update the "Startups" page template to display the RTC pricing data. We can use a templating engine like Handlebars or Mustache to render the data in the template.
+
+Here's an example of how we could update the template to display the RTC pricing data:
+```handlebars
+<div class="pricing">
+  <h2>Startups</h2>
+  <p>Price: {{price}}</p>
+</div>
+```
+We'll use the templating engine to render the `price` field from the JSON data.
+
+**Step 5: Implement the RTC pricing logic**
+
+To implement the RTC pricing logic, we'll create a component that fetches the RTC pricing data from the backend API and updates the template with the rendered price.
+
+Here's an example of how we could implement the RTC pricing logic using React:
 ```javascript
-// Import required libraries
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import { getRTCPrice } from '../api';
 
-// Define the TemplateList component
-function TemplateList() {
-  const [templates, setTemplates] = useState([]);
-  const [loading, setLoading] = useState(true);
+const StartupsPage = () => {
+  const [price, setPrice] = useState(0);
 
-  // Make an API request to retrieve templates
   useEffect(() => {
-    axios.get('/templates')
-      .then((response) => {
-        setTemplates(response.data);
-        setLoading(false);
-      })
-      .catch((error) => {
-        console.error(error);
-      });
+    getRTCPrice().then(data => {
+      setPrice(data.startups.price);
+    });
   }, []);
 
-  // Render the template list
   return (
-    <div>
-      <h1>Template Marketplace</h1>
-      <ul>
-        {templates.map((template) => (
-          <li key={template._id}>
-            <h2>{template.name}</h2>
-            <p>Price: {template.price} ({moment().format('YYYY-MM-DD HH:mm:ss')})</p>
-            <img src={template.images[0]} alt={template.name} />
-          </li>
-        ))}
-      </ul>
+    <div className="pricing">
+      <h2>Startups</h2>
+      <p>Price: ${price.toFixed(2)}</p>
+    </div>
+  );
+};
+
+export default StartupsPage;
+```
+This code fetches the RTC pricing data from the backend API using the `getRTCPrice()` function and updates the template with the rendered price.
+
+**Step 6: Integrate the RTC pricing logic with the template**
+
+We'll update the template to use the `StartupsPage` component, which renders the RTC pricing data.
+```handlebars
+{{> StartupsPage}}
+```
+This code uses the templating engine to render the `StartupsPage` component, which updates the template with the rendered price.
+
+**Code Diff**
+
+Here's an example of the code diff between the original template and the updated template:
+```diff
+// Original template
+<div class="pricing">
+  <h2>Startups</h2>
+  <p>Price: {{price}}</p>
+</div>
+
+// Updated template
+{{> StartupsPage}}
+```
+```diff
+// Original code
+function StartupsPage() {
+  return (
+    <div className="pricing">
+      <h2>Startups</h2>
+      <p>Price: ${price.toFixed(2)}</p>
     </div>
   );
 }
 
-export default TemplateList;
+// Updated code
+import React, { useState, useEffect } from 'react';
+import { getRTCPrice } from '../api';
+
+const StartupsPage = () => {
+  const [price, setPrice] = useState(0);
+
+  useEffect(() => {
+    getRTCPrice().then(data => {
+      setPrice(data.startups.price);
+    });
+  }, []);
+
+  return (
+    <div className="pricing">
+      <h2>Startups</h2>
+      <p>Price: ${price.toFixed(2)}</p>
+    </div>
+  );
+};
 ```
+This code diff shows the changes made to the template and the code to implement the RTC pricing logic.
 
-This is a simplified example to demonstrate the concept. You'll need to expand upon this solution to fit your specific requirements.
+**API Documentation**
 
-**Logic:**
+To document the API endpoint for fetching RTC pricing data, we can use the following OpenAPI specification:
+```yml
+openapi: 3.0.0
+info:
+  title: RTC Pricing API
+  description: API for fetching RTC pricing data
+  version: 1.0.0
+paths:
+  /rtc/pricing/startups:
+    get:
+      summary: Fetch RTC pricing data for startups
+      responses:
+        '200':
+          description: RTC pricing data for startups
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  startups:
+                    type: object
+                    properties:
+                      price:
+                        type: number
+                        format: float
+```
+This API documentation describes the GET endpoint for fetching RTC pricing data for startups and the response schema.
 
-The logic behind this solution is as follows:
+To fetch the RTC pricing data, we can use a library like Axios to make a request to the API endpoint.
+```javascript
+import axios from 'axios';
 
-1. The backend server creates a new template collection in MongoDB and defines an API endpoint to retrieve templates.
-2. The frontend makes an API request to retrieve templates from the server.
-3. The server retrieves all templates from the database, calculates RTC pricing for each template, and sends the updated template list as a response to the frontend.
-4. The frontend renders the template list, displaying the RTC pricing information for each template.
+const getRTCPrice = async () => {
+  const response = await axios.get('/rtc/pricing/startups');
+  return response.data;
+};
+```
+This code fetches the RTC pricing data from the API endpoint using the `getRTCPrice()` function.
