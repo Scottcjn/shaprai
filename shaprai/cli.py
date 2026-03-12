@@ -363,5 +363,188 @@ def template_fork(source: str, new_name: str, model: Optional[str]) -> None:
     click.echo(f"Template '{new_name}' forked from '{source}' at {new_path}")
 
 
+# --------------------------------------------------------------------------- #
+#  shaprai marketplace
+# --------------------------------------------------------------------------- #
+
+@main.group()
+def marketplace() -> None:
+    """Template marketplace commands.
+
+    Publish, discover, and purchase agent templates with RTC pricing.
+    """
+
+
+@marketplace.command("publish")
+@click.option("--template", "-t", "template_path", required=True, help="Path to template YAML file")
+@click.option("--price", "-p", default=0, type=float, help="Price in RTC (default: 0 = free)")
+@click.option("--author", "-a", default=None, help="Author wallet ID")
+def marketplace_publish(template_path: str, price: float, author: Optional[str]) -> None:
+    """Publish a template to the marketplace.
+
+    Example:
+        shaprai marketplace publish --template my_agent.yaml --price 10
+    """
+    from shaprai.marketplace import MarketplaceRegistry, TemplateValidator
+
+    validator = TemplateValidator()
+    result = validator.validate_file(template_path)
+
+    if not result.valid:
+        click.echo("Template validation failed:", err=True)
+        for error in result.errors:
+            click.echo(f"  - {error}", err=True)
+        sys.exit(1)
+
+    import yaml as yaml_lib
+    with open(template_path, "r") as f:
+        template_data = yaml_lib.safe_load(f)
+
+    if not author:
+        author = template_data.get("author", "anonymous")
+
+    registry = MarketplaceRegistry()
+    try:
+        published = registry.publish(template_data, author=author, price_rtc=price)
+        click.echo(f"Template published: {published.name}@{published.version}")
+        click.echo(f"  Author:  {published.author}")
+        click.echo(f"  Price:   {published.price_rtc} RTC")
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@marketplace.command("search")
+@click.option("--query", "-q", default=None, help="Search query")
+@click.option("--tag", "-t", default=None, help="Filter by tag")
+@click.option("--author", "-a", default=None, help="Filter by author")
+@click.option("--sort", "-s", type=click.Choice(["downloads", "created", "name", "price"]), default="downloads")
+@click.option("--limit", "-l", default=20, type=int, help="Maximum results")
+def marketplace_search(query: Optional[str], tag: Optional[str], author: Optional[str], sort: str, limit: int) -> None:
+    """Search templates in the marketplace."""
+    from shaprai.marketplace import MarketplaceRegistry
+
+    registry = MarketplaceRegistry()
+    results = registry.search(query=query, tag=tag, author=author, sort=sort, limit=limit)
+
+    if not results:
+        click.echo("No templates found.")
+        return
+
+    click.echo(f"{'Name':<30} {'Version':<12} {'Author':<20} {'Downloads'}")
+    click.echo("-" * 80)
+    for listing in results:
+        click.echo(f"{listing.name:<30} {listing.latest_version:<12} {listing.author:<20} {listing.total_downloads}")
+    click.echo(f"\nFound {len(results)} template(s)")
+
+
+@marketplace.command("show")
+@click.argument("template_ref")
+def marketplace_show(template_ref: str) -> None:
+    """Show template details and preview."""
+    from shaprai.marketplace import MarketplaceRegistry
+
+    registry = MarketplaceRegistry()
+    preview = registry.preview(template_ref)
+
+    if not preview:
+        click.echo(f"Template not found: {template_ref}", err=True)
+        sys.exit(1)
+
+    click.echo(f"Template: {preview['name']}@{preview['version']}")
+    click.echo(f"Author:   {preview['author']}")
+    click.echo(f"Price:    {preview['price_rtc']} RTC")
+    click.echo(f"Downloads: {preview['download_count']}")
+    click.echo(f"Tags:     {', '.join(preview['tags']) or 'none'}")
+    click.echo(f"\nDescription:")
+    click.echo(f"  {preview['description']}")
+
+    if preview['full_config_requires_purchase']:
+        click.echo(f"\n  Full configuration requires purchase ({preview['price_rtc']} RTC)")
+
+
+@marketplace.command("buy")
+@click.argument("template_ref")
+@click.option("--wallet", "-w", required=True, help="Buyer wallet ID")
+@click.option("--relay", "-r", default=None, help="Relay node for fee distribution")
+@click.option("--output", "-o", default=None, help="Output file for downloaded template")
+def marketplace_buy(template_ref: str, wallet: str, relay: Optional[str], output: Optional[str]) -> None:
+    """Purchase a template from the marketplace.
+
+    Revenue is split: 90% creator, 5% protocol, 5% relay.
+    """
+    from shaprai.marketplace import MarketplaceRegistry
+
+    registry = MarketplaceRegistry()
+    try:
+        purchase, template = registry.buy(template_ref, buyer_wallet=wallet, relay_node=relay)
+
+        click.echo(f"Template purchased: {template.name}@{template.version}")
+        click.echo(f"  Purchase ID: {purchase.id}")
+        click.echo(f"  Price:       {purchase.price_rtc} RTC")
+        click.echo(f"  Creator:     {purchase.creator_rtc} RTC -> {template.author}")
+        click.echo(f"  Protocol:    {purchase.protocol_rtc} RTC")
+        click.echo(f"  Relay:       {purchase.relay_rtc} RTC")
+
+        if output:
+            import yaml as yaml_lib
+            output_path = Path(output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, "w") as f:
+                yaml_lib.dump(template.config, f, default_flow_style=False, sort_keys=False)
+            click.echo(f"\n  Template saved to: {output_path}")
+
+    except ValueError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+
+@marketplace.command("list")
+@click.option("--author", "-a", default=None, help="Filter by author")
+@click.option("--limit", "-l", default=50, type=int, help="Maximum results")
+def marketplace_list(author: Optional[str], limit: int) -> None:
+    """List templates in the marketplace."""
+    from shaprai.marketplace import MarketplaceRegistry
+
+    registry = MarketplaceRegistry()
+    results = registry.list_templates(author=author, limit=limit)
+
+    if not results:
+        click.echo("No templates found.")
+        return
+
+    click.echo(f"{'Name':<30} {'Latest':<12} {'Author':<20} {'Downloads'}")
+    click.echo("-" * 80)
+    for listing in results:
+        click.echo(f"{listing.name:<30} {listing.latest_version:<12} {listing.author:<20} {listing.total_downloads}")
+    click.echo(f"\nTotal: {len(results)} template(s)")
+
+
+@marketplace.command("purchases")
+@click.option("--wallet", "-w", required=True, help="Buyer wallet ID")
+def marketplace_purchases(wallet: str) -> None:
+    """List purchases made by a wallet."""
+    from shaprai.marketplace import MarketplaceRegistry
+    from datetime import datetime
+
+    registry = MarketplaceRegistry()
+    purchases = registry.get_purchases(wallet)
+
+    if not purchases:
+        click.echo(f"No purchases found for wallet: {wallet}")
+        return
+
+    click.echo(f"Purchases for wallet: {wallet}")
+    click.echo("-" * 80)
+    click.echo(f"{'Template':<30} {'Version':<12} {'Price':<10} {'Date'}")
+    click.echo("-" * 80)
+
+    for purchase in purchases:
+        date = datetime.fromtimestamp(purchase.purchased_at).strftime("%Y-%m-%d %H:%M")
+        click.echo(f"{purchase.template_name:<30} {purchase.template_version:<12} {purchase.price_rtc:<10} {date}")
+
+    click.echo(f"\nTotal: {len(purchases)} purchase(s)")
+
+
 if __name__ == "__main__":
     main()
