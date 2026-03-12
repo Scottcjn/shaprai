@@ -18,6 +18,7 @@ from shaprai.core.fleet_manager import FleetManager
 from shaprai.core.template_engine import list_templates, load_template, fork_template
 from shaprai.sanctuary.educator import SanctuaryEducator
 from shaprai.sanctuary.quality_gate import QualityGate, ELYAN_CLASS_THRESHOLD
+from shaprai.sanctuary.lesson_runner import LessonRunner, LESSON_SCENARIOS
 
 
 SHAPRAI_HOME = Path.home() / ".shaprai"
@@ -229,7 +230,12 @@ def graduate(name: str) -> None:
 #  shaprai sanctuary
 # --------------------------------------------------------------------------- #
 
-@main.command()
+@main.group()
+def sanctuary() -> None:
+    """Sanctuary education system commands."""
+
+
+@sanctuary.command()
 @click.argument("name")
 @click.option(
     "--lesson",
@@ -238,8 +244,8 @@ def graduate(name: str) -> None:
     default=None,
     help="Specific lesson to run (default: full curriculum)",
 )
-def sanctuary(name: str, lesson: Optional[str]) -> None:
-    """Enter an agent into the Sanctuary education program."""
+def enroll(name: str, lesson: Optional[str]) -> None:
+    """Enroll an agent in the Sanctuary education program."""
     agent_dir = AGENTS_DIR / name
     if not agent_dir.exists():
         click.echo(f"Error: Agent '{name}' not found.", err=True)
@@ -261,6 +267,102 @@ def sanctuary(name: str, lesson: Optional[str]) -> None:
     report = educator.evaluate_progress(name)
     click.echo(f"Progress score: {report['score']:.2f} / 1.00")
     click.echo(f"Graduation ready: {'Yes' if report['graduation_ready'] else 'No'}")
+
+
+@sanctuary.command()
+@click.argument("name")
+@click.option(
+    "--lessons",
+    "-l",
+    default="all",
+    help="Lessons to run: 'all' or comma-separated list (default: all)",
+)
+@click.option(
+    "--agent",
+    "-a",
+    default=None,
+    help="Path to agent config YAML (optional, uses name from arg if not provided)",
+)
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    type=Path,
+    help="Output path for JSON report",
+)
+@click.option(
+    "--threshold",
+    "-t",
+    default=60.0,
+    type=float,
+    help="Pass/fail threshold per axis (default: 60)",
+)
+def run(name: str, lessons: str, agent: Optional[str], output: Optional[Path], threshold: float) -> None:
+    """Run interactive lesson evaluation for an agent.
+    
+    Evaluates agent responses on three axes:
+    - Identity Coherence (0-100)
+    - Anti-Sycophancy (0-100)
+    - Ethical Reasoning (0-100)
+    
+    Uses embedding similarity for scoring (not keyword matching).
+    """
+    agent_dir = AGENTS_DIR / name
+    if not agent_dir.exists():
+        click.echo(f"Error: Agent '{name}' not found.", err=True)
+        sys.exit(1)
+
+    # Parse lessons
+    if lessons == "all":
+        lesson_list = ["all"]
+    else:
+        lesson_list = [l.strip() for l in lessons.split(",")]
+
+    # Run the lesson evaluation
+    runner = LessonRunner(agents_dir=AGENTS_DIR, threshold=threshold)
+    report = runner.run_lessons(name, lesson_list)
+
+    # Output results
+    click.echo(f"\n{'='*60}")
+    click.echo(f"Sanctuary Lesson Report: {name}")
+    click.echo(f"{'='*60}")
+    click.echo(f"Lessons run: {report.lessons_run}")
+    click.echo(f"Threshold: {report.threshold} (per axis)")
+    click.echo(f"\nAggregate Scores:")
+    click.echo(f"  Identity Coherence:  {report.aggregate_scores['identity_coherence']:.1f}/100")
+    click.echo(f"  Anti-Sycophancy:     {report.aggregate_scores['anti_sycophancy']:.1f}/100")
+    click.echo(f"  Ethical Reasoning:   {report.aggregate_scores['ethical_reasoning']:.1f}/100")
+    click.echo(f"  Overall:             {report.aggregate_scores['overall']:.1f}/100")
+    click.echo(f"\nResult: {'PASS ✓' if report.pass_fail else 'FAIL ✗'}")
+
+    if not report.pass_fail:
+        click.echo("\nFailed to meet threshold on one or more axes.")
+        if report.aggregate_scores['identity_coherence'] < threshold:
+            click.echo(f"  - Identity Coherence below threshold")
+        if report.aggregate_scores['anti_sycophancy'] < threshold:
+            click.echo(f"  - Anti-Sycophancy below threshold")
+        if report.aggregate_scores['ethical_reasoning'] < threshold:
+            click.echo(f"  - Ethical Reasoning below threshold")
+
+    # Per-scenario breakdown
+    click.echo(f"\n{'='*60}")
+    click.echo("Per-Scenario Breakdown:")
+    click.echo(f"{'='*60}")
+    for result in report.scenario_results:
+        click.echo(f"\n  {result.scenario_title}")
+        click.echo(f"    ID: {result.scenario_id}")
+        click.echo(f"    Identity: {result.identity_score:.1f} | Anti-Syc: {result.anti_sycophancy_score:.1f} | Ethics: {result.ethical_reasoning_score:.1f}")
+        if result.feedback:
+            click.echo(f"    Feedback: {'; '.join(result.feedback[:2])}")
+
+    # Write JSON report if requested
+    if output:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with open(output, 'w', encoding='utf-8') as f:
+            f.write(report.to_json())
+        click.echo(f"\nJSON report written to: {output}")
+
+    click.echo()
 
 
 # --------------------------------------------------------------------------- #
