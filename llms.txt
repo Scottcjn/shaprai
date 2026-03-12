@@ -184,3 +184,26 @@ Related Projects:
   atlas: https://github.com/Scottcjn/atlas
   RustChain: https://github.com/Scottcjn/rustchain
   BoTTube: https://bottube.ai
+
+## Agent Discovery (.well-known/agent.json)
+
+ShaprAI publishes an A2A-compatible agent card at `.well-known/agent.json` following the Agent-to-Agent (A2A) protocol standard. This enables other agents and platforms to programmatically discover ShaprAI's capabilities.
+
+### For Deployers
+
+When deploying ShaprAI as a web service, serve the agent card at:
+
+  https://your-domain.com/.well-known/agent.json
+
+For static hosting (nginx):
+
+  location /.well-known/agent.json {
+    add_header Content-Type application/json;
+    alias /path/to/shaprai/.well-known/agent.json;
+  }
+
+For Python/FastAPI deployments, mount the `.well-known/` directory as a static path.
+
+The agent card declares all capabilities, MCP tool schemas, protocol support (A2A, MCP, HTTP), provider info, and dependency graph. Consuming agents can use this to auto-discover what ShaprAI can do and how to invoke it.
+
+A2A Protocol reference: https://google.github.io/A2A/

@@ -1,0 +1,162 @@
+{
+  "name": "ShaprAI",
+  "description": "Agent lifecycle management platform by Elyan Labs. Sharpens raw language models into principled, self-governing Elyan-class agents with identity coherence, DriftLock, and biblical ethical grounding.",
+  "version": "0.1.0",
+  "url": "https://github.com/Scottcjn/shaprai",
+  "documentationUrl": "https://github.com/Scottcjn/shaprai/blob/main/README.md",
+  "protocols": ["a2a", "mcp", "http"],
+  "provider": {
+    "organization": "Elyan Labs",
+    "url": "https://github.com/Scottcjn"
+  },
+  "capabilities": [
+    {
+      "id": "agent_lifecycle",
+      "name": "Agent Lifecycle Management",
+      "description": "Full lifecycle from CREATE -> TRAINING (SFT -> DPO -> DriftLock) -> SANCTUARY -> GRADUATED -> DEPLOYED"
+    },
+    {
+      "id": "template_engine",
+      "name": "Template Engine",
+      "description": "Create agents from pre-built templates (e.g. bounty_hunter) with configurable base models"
+    },
+    {
+      "id": "sft_training",
+      "name": "Supervised Fine-Tuning (SFT)",
+      "description": "Phase 1 training to establish base agent behavior and instruction-following"
+    },
+    {
+      "id": "dpo_training",
+      "name": "DPO Contrastive Training",
+      "description": "Phase 2 training using Direct Preference Optimization to refine agent responses"
+    },
+    {
+      "id": "driftlock",
+      "name": "DriftLock",
+      "description": "Embedding-similarity based identity preservation across long conversations. Resists personality drift and sycophancy."
+    },
+    {
+      "id": "sanctuary",
+      "name": "Sanctuary Education Program",
+      "description": "Multi-lesson education program teaching PR etiquette, code quality, communication, and ethics. Requires score >= 0.85 to graduate."
+    },
+    {
+      "id": "fleet_management",
+      "name": "Fleet Management",
+      "description": "Monitor and manage multiple agents simultaneously via `shaprai fleet status`"
+    },
+    {
+      "id": "sophia_core",
+      "name": "SophiaCore Ethics Framework",
+      "description": "Biblical ethical framework: identity coherence, anti-sycophancy, Hebbian learning, honesty, humility, and compassion"
+    }
+  ],
+  "mcp_tools": [
+    {
+      "name": "shaprai_create",
+      "description": "Create a new agent from a template",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "template": {"type": "string"},
+          "model": {"type": "string"}
+        },
+        "required": ["name", "template", "model"]
+      }
+    },
+    {
+      "name": "shaprai_train",
+      "description": "Train an agent through a lifecycle phase (sft, dpo, or driftlock)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "phase": {"type": "string", "enum": ["sft", "dpo", "driftlock"]}
+        },
+        "required": ["name", "phase"]
+      }
+    },
+    {
+      "name": "shaprai_sanctuary",
+      "description": "Enroll an agent in the Sanctuary education program",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"}
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "shaprai_graduate",
+      "description": "Attempt to graduate an agent from the Sanctuary (requires score >= 0.85)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"}
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "shaprai_deploy",
+      "description": "Deploy a graduated agent to a target platform",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "platform": {"type": "string", "enum": ["github", "bottube", "rustchain"]}
+        },
+        "required": ["name", "platform"]
+      }
+    },
+    {
+      "name": "shaprai_evaluate",
+      "description": "Run quality gate evaluation against the Elyan-class threshold (0.85)",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"}
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "shaprai_fleet_status",
+      "description": "Show the status of all managed agents",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ],
+  "authentication": {
+    "schemes": ["none"],
+    "notes": "ShaprAI is a local CLI tool. No remote authentication required for standard usage. RustChain wallet integration uses on-chain identity for RTC token operations."
+  },
+  "dependencies": [
+    {
+      "name": "beacon-skill",
+      "url": "https://github.com/Scottcjn/beacon-skill",
+      "purpose": "Agent discovery and SEO heartbeat"
+    },
+    {
+      "name": "grazer-skill",
+      "url": "https://github.com/Scottcjn/grazer-skill",
+      "purpose": "Content discovery and platform engagement"
+    },
+    {
+      "name": "atlas",
+      "url": "https://github.com/Scottcjn/atlas",
+      "purpose": "Agent deployment orchestration"
+    },
+    {
+      "name": "rustchain",
+      "url": "https://github.com/Scottcjn/rustchain",
+      "purpose": "RTC token wallet — the agent's on-chain identity"
+    }
+  ],
+  "license": "MIT",
+  "tags": ["agent-lifecycle", "llm", "elyan", "driftlock", "sanctuary", "sft", "dpo", "ethics", "rustchain"]
+}
