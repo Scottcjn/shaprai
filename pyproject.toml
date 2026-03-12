@@ -39,6 +39,7 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
+    "responses>=0.23.0",
     "ruff>=0.3.0",
 ]
 training = [
@@ -61,3 +62,18 @@ include = ["shaprai*"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+python_classes = ["Test*"]
+addopts = "-v --tb=short"
+markers = [
+    "integration: integration tests requiring network access",
+    "slow: slow running tests",
+]
+filterwarnings = [
+    "ignore::urllib3.exceptions.InsecureRequestWarning",
+    "ignore::requests.packages.urllib3.exceptions.InsecureRequestWarning",
+]
