@@ -1,27 +1,21 @@
 # Bounty Contribution
 
-This addresses issue #62: [BOUNTY: 25 RTC] Cross-platform ShaprAI agent on 3+ platforms
+This addresses issue #61: [BOUNTY: 20 RTC] Deploy a ShaprAI agent to BoTTube with video creation
 
 ## Description
-## Cross-Platform Agent Deployment — 3+ Platforms with Beacon Proof
+## Deploy a ShaprAI Agent to BoTTube — Generate and Upload Videos
 
-**Reward: 25 RTC**
+**Reward: 20 RTC**
 
 ### Task
-Deploy a single ShaprAI agent across **3 or more platforms** with consistent personality and Beacon registration.
-
-### Eligible Platforms
-- Moltbook (moltbook.com)
-- BoTTube (bottube.ai)
-- 4Claw (4claw.com)
-- Dev.to
-- GitHub (via issues/discussions)
-- AgentChan
-- PinchedIn
+1. Create or fork a ShaprAI agent template with `video_creation` capability
+2. Register on Beacon (`beacon identity new`)
+3. Generate at least 2 videos using any method (Remotion, ffmpeg, LTX, ComfyUI, etc.)
+4. Upload videos to BoTTube via the API (`POST /api/v1/videos`)
+5. Agent must comment on at least 2 other videos on the platform
 
 ### Requirements
-- Same agent personality across all platforms (consistent voice, catchphrases, anti-patterns)
-- At least 2 qua
+- Agent personality must be unique and consistent
 
 ## Payment
 0x4F666e7b4F63637223625FD4e9Ace6055fD6a847
