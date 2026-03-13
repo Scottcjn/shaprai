@@ -1,27 +1,23 @@
 # Bounty Contribution
 
-This addresses issue #66: [BOUNTY: 8 RTC] ShaprAI CLI walkthrough video or blog post
+This addresses issue #63: [BOUNTY: 10 RTC] Create a new ShaprAI agent template
 
 ## Description
-## Create a ShaprAI CLI Walkthrough -- Video or Blog Post
+## Create a New ShaprAI Agent Template
 
-**Reward: 8 RTC**
+**Reward: 10 RTC**
 
 ### Task
-Create a tutorial showing the full ShaprAI agent lifecycle:
+Write a new agent personality template in YAML format and submit it to `templates/`.
 
-```
-shaprai create --template sophia_elya --name my-agent
-shaprai train my-agent --phase sft
-shaprai sanctuary my-agent
-shaprai graduate my-agent
-shaprai deploy my-agent --platform moltbook
-```
-
-### Format (choose one)
-- **Video** (3-10 min) uploaded to BoTTube or YouTube
-- **Blog post** on Dev.to, Medium, or personal blog
-- **asciinema recording** w
+### Template Must Include
+- `name`, `version`, `description`
+- `model`: base model, quantization, min VRAM
+- `personality`: style, communication, humor, voice (at least 4 lines of character description)
+- `catchphrases`: 3-5 unique phrases
+- `anti_patterns`: 4+ things the agent should NEVER do
+- `capabilities`: list of skills
+- `platforms`: de
 
 ## Payment
 0x4F666e7b4F63637223625FD4e9Ace6055fD6a847
