@@ -172,25 +172,32 @@ class MarketplaceTemplate:
 
 
 def publish_template(
-    template: AgentTemplate,
+    template_path: str,
     author: str,
     price_rtc: float,
-    marketplace_dir: str,
-) -> MarketplaceTemplate:
+    description: str = "",
+    marketplace_dir: Optional[str] = None,
+) -> Dict[str, Any]:
     """Publish a template to the marketplace.
 
     Args:
-        template: The AgentTemplate to publish.
+        template_path: Path to the template YAML file.
         author: Author/publisher name.
         price_rtc: Price in RTC tokens.
-        marketplace_dir: Directory to store marketplace listings.
+        description: Optional description override.
+        marketplace_dir: Directory to store marketplace listings (default: ~/.shaprai/marketplace).
 
     Returns:
-        MarketplaceTemplate instance with listing info.
+        Dict with success status and listing info.
     """
-    marketplace_path = Path(marketplace_dir)
+    from shaprai.integrations.rustchain import pay_template_listing_fee
+    
+    marketplace_path = Path(marketplace_dir) if marketplace_dir else Path.home() / ".shaprai" / "marketplace"
     marketplace_path.mkdir(parents=True, exist_ok=True)
 
+    # Load the template
+    template = load_template(template_path)
+    
     # Save the template YAML
     template_file = marketplace_path / f"{template.name}.yaml"
     save_template(template, str(template_file))
@@ -199,7 +206,7 @@ def publish_template(
     listing = MarketplaceTemplate(
         name=template.name,
         author=author,
-        description=template.description,
+        description=description or template.description,
         price_rtc=price_rtc,
         version=template.version,
         capabilities=template.capabilities,
@@ -210,33 +217,39 @@ def publish_template(
     with open(listing_file, "w") as f:
         yaml.dump(asdict(listing), f, default_flow_style=False)
 
-    return listing
+    return {
+        "success": True,
+        "name": template.name,
+        "author": author,
+        "price_rtc": price_rtc,
+    }
 
 
 def purchase_template(
     template_name: str,
-    buyer_wallet: str,
-    marketplace_dir: str,
+    wallet_id: str,
+    marketplace_dir: Optional[str] = None,
     rustchain_url: str = RUSTCHAIN_DEFAULT_URL,
-) -> Optional[AgentTemplate]:
+) -> Dict[str, Any]:
     """Purchase a template from the marketplace.
 
     Args:
         template_name: Name of the template to purchase.
-        buyer_wallet: Buyer's RustChain wallet ID.
-        marketplace_dir: Marketplace directory.
+        wallet_id: Buyer's RustChain wallet ID.
+        marketplace_dir: Marketplace directory (default: ~/.shaprai/marketplace).
         rustchain_url: RustChain node URL for payment.
 
     Returns:
-        Purchased AgentTemplate, or None if purchase failed.
+        Dict with success status and template info.
     """
-    marketplace_path = Path(marketplace_dir)
+    from shaprai.integrations.rustchain import process_template_sale
+    
+    marketplace_path = Path(marketplace_dir) if marketplace_dir else Path.home() / ".shaprai" / "marketplace"
     listing_file = marketplace_path / f"{template_name}.listing.yaml"
     template_file = marketplace_path / f"{template_name}.yaml"
 
     if not listing_file.exists() or not template_file.exists():
-        logger.error(f"Template '{template_name}' not found in marketplace")
-        return None
+        return {"success": False, "error": f"Template '{template_name}' not found"}
 
     # Load listing to get price
     with open(listing_file, "r") as f:
@@ -247,19 +260,31 @@ def purchase_template(
 
     # Process payment via RustChain
     if price_rtc > 0:
-        payment_success = _process_template_payment(
-            buyer_wallet=buyer_wallet,
-            author_wallet=f"author-{author}",
-            amount_rtc=price_rtc,
+        payment_success = process_template_sale(
+            buyer_wallet=wallet_id,
+            seller_wallet=f"agent-{author}",
+            price_rtc=price_rtc,
             template_name=template_name,
             rustchain_url=rustchain_url,
         )
         if not payment_success:
-            logger.error("Template purchase payment failed")
-            return None
+            return {"success": False, "error": "Payment failed"}
 
-    # Load and return the template
-    return load_template(str(template_file))
+    # Load template info
+    template = load_template(str(template_file))
+    
+    # Update download count
+    listing_data["downloads"] = listing_data.get("downloads", 0) + 1
+    with open(listing_file, "w") as f:
+        yaml.dump(listing_data, f, default_flow_style=False)
+
+    return {
+        "success": True,
+        "name": template.name,
+        "description": template.description,
+        "capabilities": template.capabilities,
+        "model": template.model.get("base", "unknown"),
+    }
 
 
 def _process_template_payment(
@@ -304,16 +329,16 @@ def _process_template_payment(
         return False
 
 
-def list_marketplace_templates(marketplace_dir: str) -> List[MarketplaceTemplate]:
+def list_marketplace_templates(marketplace_dir: Optional[str] = None) -> List[Dict[str, Any]]:
     """List all templates available in the marketplace.
 
     Args:
-        marketplace_dir: Marketplace directory path.
+        marketplace_dir: Marketplace directory path (default: ~/.shaprai/marketplace).
 
     Returns:
-        List of MarketplaceTemplate instances.
+        List of template dicts with name, author, price_rtc, rating, etc.
     """
-    marketplace_path = Path(marketplace_dir)
+    marketplace_path = Path(marketplace_dir) if marketplace_dir else Path.home() / ".shaprai" / "marketplace"
     if not marketplace_path.exists():
         return []
 
@@ -322,7 +347,13 @@ def list_marketplace_templates(marketplace_dir: str) -> List[MarketplaceTemplate
         try:
             with open(listing_file, "r") as f:
                 data = yaml.safe_load(f)
-            templates.append(MarketplaceTemplate(**data))
+            templates.append({
+                "name": data.get("name", ""),
+                "author": data.get("author", "unknown"),
+                "price_rtc": data.get("price_rtc", 0.0),
+                "rating": data.get("rating", 0.0),
+                "downloads": data.get("downloads", 0),
+            })
         except Exception:
             continue  # Skip malformed listings
 
@@ -332,23 +363,23 @@ def list_marketplace_templates(marketplace_dir: str) -> List[MarketplaceTemplate
 def rate_template(
     template_name: str,
     rating: float,
-    marketplace_dir: str,
-) -> bool:
+    marketplace_dir: Optional[str] = None,
+) -> Dict[str, Any]:
     """Rate a purchased template.
 
     Args:
         template_name: Template to rate.
         rating: Rating score (1.0-5.0).
-        marketplace_dir: Marketplace directory.
+        marketplace_dir: Marketplace directory (default: ~/.shaprai/marketplace).
 
     Returns:
-        True if rating was recorded successfully.
+        Dict with success status and new rating.
     """
-    marketplace_path = Path(marketplace_dir)
+    marketplace_path = Path(marketplace_dir) if marketplace_dir else Path.home() / ".shaprai" / "marketplace"
     listing_file = marketplace_path / f"{template_name}.listing.yaml"
 
     if not listing_file.exists():
-        return False
+        return {"success": False, "error": f"Template '{template_name}' not found"}
 
     with open(listing_file, "r") as f:
         data = yaml.safe_load(f)
@@ -360,11 +391,16 @@ def rate_template(
     # New average = (old_sum + new_rating) / (count + 1)
     old_sum = current_rating * current_downloads
     new_count = current_downloads + 1
-    data["rating"] = round((old_sum + rating) / new_count, 2)
+    new_rating = round((old_sum + rating) / new_count, 2)
+    
+    data["rating"] = new_rating
     data["downloads"] = new_count
     data["updated_at"] = time.time()
 
     with open(listing_file, "w") as f:
         yaml.dump(data, f, default_flow_style=False)
 
-    return True
+    return {
+        "success": True,
+        "new_rating": new_rating,
+    }
