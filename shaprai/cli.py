@@ -9,9 +9,16 @@ from pathlib import Path
 from typing import Optional
 
 import click
-import yaml
 
 from shaprai import __version__
+from shaprai.a11y import (
+    OutputFormat,
+    emit_error,
+    emit_key_value,
+    emit_success,
+    emit_table,
+    set_output_format,
+)
 from shaprai.prerequisites import require_elyan_ecosystem
 from shaprai.core.lifecycle import AgentState, create_agent, deploy_agent, get_agent_status
 from shaprai.core.fleet_manager import FleetManager
@@ -34,13 +41,29 @@ def _ensure_dirs() -> None:
 @click.group()
 @click.version_option(version=__version__, prog_name="shaprai")
 @click.option("--skip-checks", is_flag=True, hidden=True, help="Skip prerequisite checks (dev only)")
-def main(skip_checks: bool = False) -> None:
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["text", "json", "plain"], case_sensitive=False),
+    default="text",
+    help=(
+        "Output format. 'text' for aligned columns (default), "
+        "'json' for machine-readable output, "
+        "'plain' for screen-reader-friendly unformatted text."
+    ),
+)
+@click.pass_context
+def main(ctx: click.Context, skip_checks: bool = False, output_format: str = "text") -> None:
     """ShaprAI -- Sharpen raw models into Elyan-class agents.
 
     REQUIRES: beacon-skill, grazer-skill, atlas, RustChain.
     These are not optional. An agent without the full Elyan
     ecosystem is not an Elyan-class agent.
+
+    Use --format plain for screen-reader-friendly output, or
+    --format json for assistive-technology and scripting integration.
     """
+    set_output_format(ctx, OutputFormat(output_format))
     _ensure_dirs()
     if not skip_checks:
         require_elyan_ecosystem()
@@ -52,8 +75,14 @@ def main(skip_checks: bool = False) -> None:
 
 @main.command()
 @click.argument("name")
-@click.option("--template", "-t", default="bounty_hunter", help="Template name or path")
-@click.option("--model", "-m", default=None, help="HuggingFace model ID override")
+@click.option(
+    "--template", "-t", default="bounty_hunter",
+    help="Template name (from built-in templates) or filesystem path to a YAML template file.",
+)
+@click.option(
+    "--model", "-m", default=None,
+    help="HuggingFace model ID to use instead of the template default (e.g. Qwen/Qwen3-7B-Instruct).",
+)
 def create(name: str, template: str, model: Optional[str]) -> None:
     """Create a new agent from a template.
 
@@ -70,7 +99,10 @@ def create(name: str, template: str, model: Optional[str]) -> None:
     if not template_path.exists():
         template_path = Path(template)
     if not template_path.exists():
-        click.echo(f"Error: Template '{template}' not found.", err=True)
+        emit_error(
+            f"Template '{template}' not found.",
+            hint="Run 'shaprai template list' to see available templates.",
+        )
         sys.exit(1)
 
     tmpl = load_template(str(template_path))
@@ -89,14 +121,18 @@ def create(name: str, template: str, model: Optional[str]) -> None:
         description=tmpl.description or f"ShaprAI agent from {tmpl.name} template",
     )
 
-    click.echo(f"Agent '{name}' created from template '{tmpl.name}'")
-    click.echo(f"  Model:    {tmpl.model.get('base', 'unset')}")
-    click.echo(f"  State:    {agent['state']}")
-    click.echo(f"  Wallet:   {elyan_agent.wallet_id}")
-    click.echo(f"  Beacon:   {elyan_agent.beacon_id}")
-    click.echo(f"  Atlas:    {elyan_agent.atlas_node_id}")
-    click.echo(f"  Platforms: {', '.join(elyan_agent.grazer_platforms)}")
-    click.echo(f"  Path:     {AGENTS_DIR / name}")
+    emit_key_value(
+        [
+            ("Model", tmpl.model.get("base", "unset")),
+            ("State", agent["state"]),
+            ("Wallet", elyan_agent.wallet_id),
+            ("Beacon", elyan_agent.beacon_id),
+            ("Atlas", elyan_agent.atlas_node_id),
+            ("Platforms", ", ".join(elyan_agent.grazer_platforms)),
+            ("Path", str(AGENTS_DIR / name)),
+        ],
+        title=f"Agent '{name}' created from template '{tmpl.name}'",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -110,15 +146,25 @@ def create(name: str, template: str, model: Optional[str]) -> None:
     "-p",
     type=click.Choice(["sft", "dpo", "driftlock"]),
     required=True,
-    help="Training phase",
+    help="Training phase: 'sft' (supervised fine-tuning), 'dpo' (preference optimisation), "
+         "or 'driftlock' (identity coherence evaluation). Run in order: sft, dpo, driftlock.",
 )
-@click.option("--data", "-d", default=None, help="Path to training data")
-@click.option("--epochs", "-e", default=3, type=int, help="Number of epochs")
+@click.option(
+    "--data", "-d", default=None,
+    help="Path to training data file (JSONL for sft, pairs JSONL for dpo).",
+)
+@click.option("--epochs", "-e", default=3, type=int, help="Number of training epochs (default: 3).")
 def train(name: str, phase: str, data: Optional[str], epochs: int) -> None:
-    """Train an agent through a specific phase."""
+    """Train an agent through a specific phase.
+
+    Phases must be run in order: sft -> dpo -> driftlock.
+    """
     agent_dir = AGENTS_DIR / name
     if not agent_dir.exists():
-        click.echo(f"Error: Agent '{name}' not found. Run 'shaprai create' first.", err=True)
+        emit_error(
+            f"Agent '{name}' not found.",
+            hint=f"Run 'shaprai create {name}' first.",
+        )
         sys.exit(1)
 
     click.echo(f"Training '{name}' -- phase: {phase}, epochs: {epochs}")
@@ -140,11 +186,14 @@ def train(name: str, phase: str, data: Optional[str], epochs: int) -> None:
         report = evaluator.run_coherence_test()
         click.echo(f"DriftLock score: {report['drift_score']:.4f}")
         if report["passed"]:
-            click.echo("PASSED -- Identity coherence maintained.")
+            emit_success("PASSED -- Identity coherence maintained.")
         else:
-            click.echo("FAILED -- Drift detected. Re-train with DPO.", err=True)
+            emit_error(
+                "FAILED -- Drift detected.",
+                hint=f"Re-train with: shaprai train {name} --phase dpo",
+            )
 
-    click.echo(f"Phase '{phase}' complete for '{name}'.")
+    emit_success(f"Phase '{phase}' complete for '{name}'.")
 
 
 # --------------------------------------------------------------------------- #
@@ -161,7 +210,7 @@ def generate_sft(template_path: str, output_path: str, count: int) -> None:
 
     generator = SFTGenerator()
     out = generator.generate_file(template_path, output_path, count=count)
-    click.echo(f"Generated {count} ChatML examples at {out}")
+    emit_success(f"Generated {count} ChatML examples at {out}")
 
 
 # --------------------------------------------------------------------------- #
@@ -175,26 +224,29 @@ def generate_sft(template_path: str, output_path: str, count: int) -> None:
     "-p",
     type=click.Choice(["bottube", "moltbook", "github", "all"]),
     default="all",
-    help="Target platform",
+    help="Target deployment platform, or 'all' for bottube + moltbook + github (default: all).",
 )
 def deploy(name: str, platform: str) -> None:
     """Deploy a graduated agent to one or more platforms."""
     agent_dir = AGENTS_DIR / name
     if not agent_dir.exists():
-        click.echo(f"Error: Agent '{name}' not found.", err=True)
+        emit_error(
+            f"Agent '{name}' not found.",
+            hint="Run 'shaprai fleet status' to see available agents.",
+        )
         sys.exit(1)
 
     status = get_agent_status(name, agents_dir=AGENTS_DIR)
     if status.get("state") != AgentState.GRADUATED.value:
-        click.echo(
-            f"Error: Agent must be GRADUATED before deployment. Current state: {status.get('state')}",
-            err=True,
+        emit_error(
+            f"Agent must be GRADUATED before deployment. Current state: {status.get('state')}",
+            hint=f"Run 'shaprai graduate {name}' after completing the Sanctuary curriculum.",
         )
         sys.exit(1)
 
     platforms = ["bottube", "moltbook", "github"] if platform == "all" else [platform]
     deploy_agent(name, platforms, agents_dir=AGENTS_DIR)
-    click.echo(f"Agent '{name}' deployed to: {', '.join(platforms)}")
+    emit_success(f"Agent '{name}' deployed to: {', '.join(platforms)}")
 
 
 # --------------------------------------------------------------------------- #
@@ -204,20 +256,28 @@ def deploy(name: str, platform: str) -> None:
 @main.command()
 @click.argument("name")
 def evaluate(name: str) -> None:
-    """Evaluate an agent using PSE markers."""
+    """Evaluate an agent against the Elyan-class quality gate using PSE markers."""
     agent_dir = AGENTS_DIR / name
     if not agent_dir.exists():
-        click.echo(f"Error: Agent '{name}' not found.", err=True)
+        emit_error(
+            f"Agent '{name}' not found.",
+            hint="Run 'shaprai fleet status' to see available agents.",
+        )
         sys.exit(1)
 
     gate = QualityGate()
     status = get_agent_status(name, agents_dir=AGENTS_DIR)
 
-    click.echo(f"Evaluating '{name}'...")
-    click.echo(f"  State: {status.get('state', 'unknown')}")
-    click.echo(f"  Elyan-class threshold: {ELYAN_CLASS_THRESHOLD}")
-    click.echo(f"  DriftLock: {'enabled' if status.get('driftlock', {}).get('enabled') else 'disabled'}")
-    click.echo("  Run 'shaprai train --phase driftlock' for full coherence evaluation.")
+    driftlock_status = "enabled" if status.get("driftlock", {}).get("enabled") else "disabled"
+    emit_key_value(
+        [
+            ("State", status.get("state", "unknown")),
+            ("Elyan-class threshold", str(ELYAN_CLASS_THRESHOLD)),
+            ("DriftLock", driftlock_status),
+            ("Next step", "Run 'shaprai train --phase driftlock' for full coherence evaluation"),
+        ],
+        title=f"Evaluating '{name}'",
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -227,19 +287,28 @@ def evaluate(name: str) -> None:
 @main.command()
 @click.argument("name")
 def graduate(name: str) -> None:
-    """Attempt to graduate an agent from the Sanctuary."""
+    """Attempt to graduate an agent from the Sanctuary.
+
+    The agent must have completed all four Sanctuary lessons and scored
+    at or above the Elyan-class threshold (0.85) to graduate.
+    """
     agent_dir = AGENTS_DIR / name
     if not agent_dir.exists():
-        click.echo(f"Error: Agent '{name}' not found.", err=True)
+        emit_error(
+            f"Agent '{name}' not found.",
+            hint="Run 'shaprai fleet status' to see available agents.",
+        )
         sys.exit(1)
 
     educator = SanctuaryEducator(agents_dir=AGENTS_DIR)
     passed = educator.graduate(name)
     if passed:
-        click.echo(f"Agent '{name}' has GRADUATED to Elyan-class status.")
+        emit_success(f"Agent '{name}' has GRADUATED to Elyan-class status.")
     else:
-        click.echo(f"Agent '{name}' did not meet graduation requirements.", err=True)
-        click.echo("Run 'shaprai sanctuary' for additional education.")
+        emit_error(
+            f"Agent '{name}' did not meet graduation requirements.",
+            hint=f"Run 'shaprai sanctuary {name}' for additional education.",
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -253,13 +322,22 @@ def graduate(name: str) -> None:
     "-l",
     type=click.Choice(["pr_etiquette", "code_quality", "communication", "ethics"]),
     default=None,
-    help="Specific lesson to run (default: full curriculum)",
+    help="Specific lesson to run: pr_etiquette, code_quality, communication, or ethics. "
+         "Omit to run the full four-lesson curriculum.",
 )
 def sanctuary(name: str, lesson: Optional[str]) -> None:
-    """Enter an agent into the Sanctuary education program."""
+    """Enter an agent into the Sanctuary education program.
+
+    The Sanctuary teaches PR etiquette, code quality, communication,
+    and ethics (SophiaCore). Agents must complete all lessons before
+    they can attempt graduation.
+    """
     agent_dir = AGENTS_DIR / name
     if not agent_dir.exists():
-        click.echo(f"Error: Agent '{name}' not found.", err=True)
+        emit_error(
+            f"Agent '{name}' not found.",
+            hint=f"Run 'shaprai create {name}' first.",
+        )
         sys.exit(1)
 
     educator = SanctuaryEducator(agents_dir=AGENTS_DIR)
@@ -268,16 +346,18 @@ def sanctuary(name: str, lesson: Optional[str]) -> None:
 
     if lesson:
         educator.run_lesson(name, lesson)
-        click.echo(f"Lesson '{lesson}' complete.")
+        emit_success(f"Lesson '{lesson}' complete.")
     else:
         for lesson_type in ["pr_etiquette", "code_quality", "communication", "ethics"]:
             click.echo(f"Running lesson: {lesson_type}...")
             educator.run_lesson(name, lesson_type)
-        click.echo("Full curriculum complete.")
+        emit_success("Full curriculum complete.")
 
     report = educator.evaluate_progress(name)
-    click.echo(f"Progress score: {report['score']:.2f} / 1.00")
-    click.echo(f"Graduation ready: {'Yes' if report['graduation_ready'] else 'No'}")
+    emit_key_value([
+        ("Progress score", f"{report['score']:.2f} / 1.00"),
+        ("Graduation ready", "Yes" if report["graduation_ready"] else "No"),
+    ])
 
 
 # --------------------------------------------------------------------------- #
@@ -291,7 +371,11 @@ def fleet() -> None:
 
 @fleet.command("status")
 def fleet_status() -> None:
-    """Show status of all managed agents."""
+    """Show status of all managed agents.
+
+    Lists every agent with its lifecycle state, source template,
+    and deployment platforms.
+    """
     fm = FleetManager(agents_dir=AGENTS_DIR)
     agents = fm.list_agents()
 
@@ -299,14 +383,17 @@ def fleet_status() -> None:
         click.echo("No agents managed. Run 'shaprai create' to get started.")
         return
 
-    click.echo(f"{'Name':<25} {'State':<15} {'Template':<20} {'Platforms'}")
-    click.echo("-" * 80)
-    for agent in agents:
-        platforms = ", ".join(agent.get("platforms", []))
-        click.echo(
-            f"{agent['name']:<25} {agent['state']:<15} {agent.get('template', 'unknown'):<20} {platforms}"
-        )
-    click.echo(f"\nTotal: {len(agents)} agent(s)")
+    headers = ["Name", "State", "Template", "Platforms"]
+    rows = [
+        [
+            agent["name"],
+            agent["state"],
+            agent.get("template", "unknown"),
+            ", ".join(agent.get("platforms", [])),
+        ]
+        for agent in agents
+    ]
+    emit_table(headers, rows, footer=f"\nTotal: {len(agents)} agent(s)")
 
 
 # --------------------------------------------------------------------------- #
@@ -320,26 +407,30 @@ def template() -> None:
 
 @template.command("list")
 def template_list() -> None:
-    """List available agent templates."""
+    """List available agent templates with their base models and descriptions."""
     templates = list_templates(str(TEMPLATES_DIR))
     if not templates:
         click.echo("No templates found.")
         return
 
-    click.echo(f"{'Name':<25} {'Model':<35} {'Description'}")
-    click.echo("-" * 90)
-    for tmpl in templates:
-        model = tmpl.model.get("base", "unset")
-        desc = tmpl.description[:40] if tmpl.description else ""
-        click.echo(f"{tmpl.name:<25} {model:<35} {desc}")
+    headers = ["Name", "Model", "Description"]
+    rows = [
+        [
+            tmpl.name,
+            tmpl.model.get("base", "unset"),
+            tmpl.description[:60] if tmpl.description else "",
+        ]
+        for tmpl in templates
+    ]
+    emit_table(headers, rows)
 
 
 @template.command("create")
 @click.argument("name")
-@click.option("--model", "-m", required=True, help="HuggingFace model ID")
-@click.option("--description", "-d", default="", help="Template description")
+@click.option("--model", "-m", required=True, help="HuggingFace model ID (e.g. Qwen/Qwen3-7B-Instruct).")
+@click.option("--description", "-d", default="", help="Human-readable description of the template's purpose.")
 def template_create(name: str, model: str, description: str) -> None:
-    """Create a new agent template."""
+    """Create a new agent template with a specified base model."""
     from shaprai.core.template_engine import AgentTemplate, save_template
 
     tmpl = AgentTemplate(
@@ -354,18 +445,21 @@ def template_create(name: str, model: str, description: str) -> None:
     )
     path = TEMPLATES_DIR / f"{name}.yaml"
     save_template(tmpl, str(path))
-    click.echo(f"Template '{name}' created at {path}")
+    emit_success(f"Template '{name}' created at {path}")
 
 
 @template.command("fork")
 @click.argument("source")
 @click.argument("new_name")
-@click.option("--model", "-m", default=None, help="Override model")
+@click.option("--model", "-m", default=None, help="HuggingFace model ID to override the source template's model.")
 def template_fork(source: str, new_name: str, model: Optional[str]) -> None:
-    """Fork an existing template with overrides."""
+    """Fork an existing template with optional overrides."""
     source_path = TEMPLATES_DIR / f"{source}.yaml"
     if not source_path.exists():
-        click.echo(f"Error: Source template '{source}' not found.", err=True)
+        emit_error(
+            f"Source template '{source}' not found.",
+            hint="Run 'shaprai template list' to see available templates.",
+        )
         sys.exit(1)
 
     overrides = {}
@@ -377,7 +471,7 @@ def template_fork(source: str, new_name: str, model: Optional[str]) -> None:
     from shaprai.core.template_engine import save_template
 
     save_template(new_tmpl, str(new_path))
-    click.echo(f"Template '{new_name}' forked from '{source}' at {new_path}")
+    emit_success(f"Template '{new_name}' forked from '{source}' at {new_path}")
 
 
 if __name__ == "__main__":
