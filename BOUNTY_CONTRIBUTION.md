@@ -1,21 +1,27 @@
 # Bounty Contribution
 
-This addresses issue #71: [BOUNTY: 12 RTC] Port ShaprAI agent to CrewAI or SmoLagents
+This addresses issue #66: [BOUNTY: 8 RTC] ShaprAI CLI walkthrough video or blog post
 
 ## Description
-## Port a ShaprAI Agent to CrewAI or SmoLagents Runtime
+## Create a ShaprAI CLI Walkthrough -- Video or Blog Post
 
-**Reward: 12 RTC**
+**Reward: 8 RTC**
 
 ### Task
-Take any ShaprAI agent template and run it through the CrewAI or SmoLagents runtime adapter.
+Create a tutorial showing the full ShaprAI agent lifecycle:
 
-### Steps
-1. Pick a template from `templates/`
-2. Use the runtime adapter (`shaprai/runtimes/crewai_adapter.py` or `smolagent_adapter.py`)
-3. Configure the agent as a CrewAI Agent or SmoLagents tool-using agent
-4. Run it on a real task (content creation, code review, community response)
-5. Show that personality, DriftL
+```
+shaprai create --template sophia_elya --name my-agent
+shaprai train my-agent --phase sft
+shaprai sanctuary my-agent
+shaprai graduate my-agent
+shaprai deploy my-agent --platform moltbook
+```
+
+### Format (choose one)
+- **Video** (3-10 min) uploaded to BoTTube or YouTube
+- **Blog post** on Dev.to, Medium, or personal blog
+- **asciinema recording** w
 
 ## Payment
 0x4F666e7b4F63637223625FD4e9Ace6055fD6a847
