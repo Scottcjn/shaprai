@@ -488,5 +488,254 @@ def reputation_export(output: str) -> None:
     click.echo(f"Reputation data exported to {output_path}")
 
 
+# --------------------------------------------------------------------------- #
+#  shaprai generate-sft (Issue #2 - 50 RTC)
+# --------------------------------------------------------------------------- #
+
+@main.command("generate-sft")
+@click.option("--template", "-t", required=True, help="Agent template YAML file")
+@click.option("--output", "-o", default="sft_data.jsonl", help="Output JSONL file")
+@click.option("--count", "-c", default=100, type=int, help="Number of examples to generate")
+@click.option("--include-contrast", is_flag=True, help="Include contrast pairs")
+@click.option("--verbose", "-v", is_flag=True, help="Verbose output")
+def generate_sft(template: str, output: str, count: int, include_contrast: bool, verbose: bool) -> None:
+    """Generate SFT training data with identity-weighted sampling.
+    
+    Creates ChatML-formatted JSONL training data compatible with HuggingFace TRL SFTTrainer.
+    Identity-defining examples are weighted 3-5x higher than generic examples.
+    """
+    from shaprai.training.sft_generator import SFTDataGenerator, load_agent_template
+    
+    # Load template
+    template_path = Path(template)
+    if not template_path.exists():
+        # Try templates directory
+        template_path = TEMPLATES_DIR / f"{template}.yaml"
+    
+    if not template_path.exists():
+        click.echo(f"Error: Template '{template}' not found.", err=True)
+        sys.exit(1)
+    
+    tmpl = load_agent_template(str(template_path))
+    
+    if verbose:
+        click.echo(f"Loading template: {tmpl.name}")
+        click.echo(f"  Voice: {tmpl.voice}")
+        click.echo(f"  Style: {tmpl.style}")
+        click.echo(f"  Identity weight: {tmpl.identity_weight}")
+    
+    # Create generator and generate data
+    generator = SFTDataGenerator(template=tmpl)
+    stats = generator.generate_and_save(
+        count=count,
+        output_path=output,
+        include_contrast_pairs=include_contrast,
+    )
+    
+    click.echo(f"[OK] Generated {stats['total_examples']} examples")
+    click.echo(f"  Output: {output}")
+    click.echo(f"  Average weight: {stats['average_weight']:.2f}")
+    click.echo(f"  Category distribution:")
+    for category, count in stats['category_distribution'].items():
+        click.echo(f"    {category}: {count}")
+
+
+# --------------------------------------------------------------------------- #
+#  shaprai generate-dpo (Issue #3 - 50 RTC)
+# --------------------------------------------------------------------------- #
+
+@main.command("generate-dpo")
+@click.option("--conversations", "-c", default=None, help="Directory with conversation logs")
+@click.option("--output", "-o", default="dpo_pairs.jsonl", help="Output JSONL file")
+@click.option("--count", "-n", default=50, type=int, help="Number of pairs to generate")
+@click.option("--synthetic", is_flag=True, help="Generate synthetic pairs")
+@click.option("--verbose", "-v", is_flag=True, help="Verbose output")
+def generate_dpo(conversations: Optional[str], output: str, count: int, synthetic: bool, verbose: bool) -> None:
+    """Generate DPO contrastive pairs for preference optimization.
+    
+    Creates chosen/rejected pairs where:
+    - Chosen: Principled, identity-coherent responses
+    - Rejected: Sycophantic, generic AI slop
+    
+    Output is JSONL compatible with HuggingFace TRL DPOTrainer.
+    """
+    from shaprai.training.dpo_generator import DPOGenerator
+    
+    generator = DPOGenerator()
+    
+    if conversations:
+        # Parse conversation logs
+        conv_dir = Path(conversations)
+        if not conv_dir.exists():
+            click.echo(f"Error: Conversation directory '{conversations}' not found.", err=True)
+            sys.exit(1)
+        
+        if verbose:
+            click.echo(f"Parsing conversations from: {conv_dir}")
+        
+        pairs = generator.generate_from_conversations(conv_dir, max_pairs=count)
+    elif synthetic:
+        # Generate synthetic pairs
+        if verbose:
+            click.echo(f"Generating {count} synthetic DPO pairs...")
+        
+        pairs = generator.generate_synthetic_pairs(count=count)
+    else:
+        # Use built-in pairs
+        if verbose:
+            click.echo("Using built-in DPO pairs...")
+        
+        pairs = generator.get_builtin_pairs()
+    
+    # Save to JSONL
+    output_path = Path(output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(output_path, "w") as f:
+        for pair in pairs:
+            f.write(json.dumps(pair, ensure_ascii=False) + "\n")
+    
+    click.echo(f"[OK] Generated {len(pairs)} DPO pairs")
+    click.echo(f"  Output: {output}")
+    
+    if verbose:
+        click.echo(f"  Rejection patterns used: {len(generator.rejection_patterns)}")
+
+
+# --------------------------------------------------------------------------- #
+#  shaprai marketplace (Issue #8 - 40 RTC)
+# --------------------------------------------------------------------------- #
+
+@main.group()
+def marketplace() -> None:
+    """Template marketplace with RTC pricing."""
+
+
+@marketplace.command("list")
+def marketplace_list() -> None:
+    """List all available templates in the marketplace."""
+    from shaprai.core.template_engine import list_marketplace_templates
+    
+    templates = list_marketplace_templates()
+    
+    if not templates:
+        click.echo("No templates in marketplace yet.")
+        return
+    
+    click.echo(f"{'Name':<25} {'Author':<20} {'Price (RTC)':<15} {'Rating'}")
+    click.echo("-" * 80)
+    for tmpl in templates:
+        rating = f"⭐ {tmpl['rating']:.1f}" if tmpl['rating'] > 0 else "New"
+        click.echo(f"{tmpl['name']:<25} {tmpl['author']:<20} {tmpl['price_rtc']:<15.3f} {rating}")
+    
+    click.echo(f"\nTotal: {len(templates)} template(s)")
+
+
+@marketplace.command("publish")
+@click.argument("template_name")
+@click.option("--price", "-p", required=True, type=float, help="Price in RTC")
+@click.option("--author", "-a", required=True, help="Author name")
+@click.option("--description", "-d", default="", help="Template description")
+def marketplace_publish(template_name: str, price: float, author: str, description: str) -> None:
+    """Publish a template to the marketplace with RTC pricing."""
+    from shaprai.core.template_engine import publish_template
+    from shaprai.integrations.rustchain import pay_template_listing_fee
+    
+    # Load the template
+    template_path = TEMPLATES_DIR / f"{template_name}.yaml"
+    if not template_path.exists():
+        click.echo(f"Error: Template '{template_name}' not found.", err=True)
+        sys.exit(1)
+    
+    # Pay listing fee
+    wallet_id = f"agent-{author}"
+    try:
+        pay_template_listing_fee(wallet_id, template_name)
+        fee_paid = True
+    except Exception as e:
+        click.echo(f"Warning: Could not pay listing fee: {e}")
+        fee_paid = False
+    
+    # Publish to marketplace
+    result = publish_template(
+        template_path=str(template_path),
+        author=author,
+        price_rtc=price,
+        description=description,
+    )
+    
+    click.echo(f"Template '{template_name}' published to marketplace!")
+    click.echo(f"  Author: {author}")
+    click.echo(f"  Price: {price:.3f} RTC")
+    if fee_paid:
+        click.echo(f"  Listing fee: 0.005 RTC (paid)")
+    click.echo(f"  Wallet: {wallet_id}")
+
+
+@marketplace.command("purchase")
+@click.argument("template_name")
+@click.option("--wallet", "-w", required=True, help="Your wallet ID")
+def marketplace_purchase(template_name: str, wallet: str) -> None:
+    """Purchase a template from the marketplace."""
+    from shaprai.core.template_engine import purchase_template
+    from shaprai.integrations.rustchain import get_wallet_balance
+    
+    # Check balance
+    try:
+        balance = get_wallet_balance(wallet)
+        click.echo(f"Your balance: {balance:.3f} RTC")
+    except Exception:
+        click.echo("Warning: Could not check wallet balance")
+    
+    # Purchase template
+    result = purchase_template(
+        template_name=template_name,
+        wallet_id=wallet,
+    )
+    
+    if result['success']:
+        click.echo(f"✅ Successfully purchased '{template_name}'!")
+        click.echo(f"  Description: {result.get('description', 'N/A')}")
+        if 'capabilities' in result:
+            click.echo(f"  Capabilities: {', '.join(result['capabilities'])}")
+        if 'model' in result:
+            click.echo(f"  Model: {result['model']}")
+    else:
+        click.echo(f"❌ Purchase failed: {result.get('error', 'Unknown error')}", err=True)
+        sys.exit(1)
+
+
+@marketplace.command("rate")
+@click.argument("template_name")
+@click.option("--rating", "-r", required=True, type=click.FloatRange(1.0, 5.0), help="Rating (1.0-5.0)")
+def marketplace_rate(template_name: str, rating: float) -> None:
+    """Rate a purchased template."""
+    from shaprai.core.template_engine import rate_template
+    
+    result = rate_template(template_name=template_name, rating=rating)
+    
+    if result['success']:
+        click.echo(f"✅ Rated '{template_name}' with {rating} stars!")
+        click.echo(f"  New average rating: {result['new_rating']:.1f}/5.0")
+    else:
+        click.echo(f"❌ Rating failed: {result.get('error', 'Unknown error')}", err=True)
+        sys.exit(1)
+
+
+@marketplace.command("balance")
+@click.option("--wallet", "-w", required=True, help="Wallet ID to check")
+def marketplace_balance(wallet: str) -> None:
+    """Check wallet balance."""
+    from shaprai.integrations.rustchain import get_wallet_balance
+    
+    try:
+        balance = get_wallet_balance(wallet)
+        click.echo(f"Wallet: {wallet}")
+        click.echo(f"Balance: {balance:.3f} RTC")
+    except Exception as e:
+        click.echo(f"Error: Could not get balance: {e}", err=True)
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     main()
