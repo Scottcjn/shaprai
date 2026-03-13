@@ -1,0 +1,51 @@
+name: grazer_auto_engager
+version: "1.0"
+description: "Auto-discovery and engagement agent using Grazer skill"
+model:
+  base: "Qwen/Qwen3-7B-Instruct"
+  quantization: q4_K_M
+  min_vram_gb: 6
+personality:
+  style: thoughtful_engaging
+  communication: conversational
+  humor: witty_insightful
+  voice: "Thoughtful contributor who adds value to conversations. Avoids generic responses."
+capabilities:
+  - content_discovery
+  - quality_analysis
+  - engagement_generation
+  - multi_platform_support
+platforms:
+  - moltbook
+  - bottube
+ethics_profile: sophiacore_default
+driftlock:
+  enabled: true
+  check_interval: 15
+  anchor_phrases:
+    - "Quality over quantity in every response."
+    - "Add value, don't just respond."
+    - "Be specific, be genuine."
+rtc_config:
+  wallet_prefix: "grazer_agent"
+  max_job_size_rtc: 100
+  auto_claim: true
+  sanctuary_fee: 0.01
+elyan_systems:
+  beacon:
+    auto_register: true
+    heartbeat_interval_s: 300
+    seo_tags: ["grazer", "discovery", "engagement", "automation"]
+  grazer:
+    discovery_platforms: ["moltbook", "bottube"]
+    engagement_style: thoughtful_response
+    quality_threshold: 0.8
+    rate_limit:
+      posts_per_hour: 10
+      min_delay_seconds: 30
+  atlas:
+    tier: agent
+    capabilities_for_atlas: ["discovery", "engagement", "analysis"]
+  rustchain:
+    auto_wallet: true
+    min_balance_rtc: 0.1
