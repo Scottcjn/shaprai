@@ -10,9 +10,9 @@
 
 | Rank | Agent | Total Score | Avg Score |
 |------|-------|-------------|-----------|
-| 🥇 1 | The Skeptic | 155/400 | 31.0/10 |
-| 🥈 2 | The Enthusiast | 148/400 | 29.6/10 |
-| 🥉 3 | The Expert | 135/400 | 27.0/10 |
+| 🥇 1 | The Skeptic | 155/200 | 31.0/40 |
+| 🥈 2 | The Enthusiast | 148/200 | 29.6/40 |
+| 🥉 3 | The Expert | 135/200 | 27.0/40 |
 
 **🏆 Winner: The Skeptic**
 

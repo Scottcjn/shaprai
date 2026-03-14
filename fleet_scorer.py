@@ -212,7 +212,7 @@ def generate_scorecard(results: Dict, output_path: str):
         
         for rank, (agent, total, avg) in enumerate(agent_totals, 1):
             medal = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉"
-            f.write(f"| {medal} {rank} | {agent} | {total}/400 | {avg:.1f}/10 |\n")
+            f.write(f"| {medal} {rank} | {agent} | {total}/200 | {avg:.1f}/10 |\n")
         
         winner = agent_totals[0][0] if agent_totals else "None"
         f.write(f"\n**🏆 Winner: {winner}**\n\n")
@@ -314,7 +314,7 @@ def main():
     for agent, content_results in results.items():
         total = sum(r['score']['total'] for r in content_results)
         avg = total / len(content_results) if content_results else 0
-        print(f"  {agent}: {total}/400 (avg {avg:.1f}/10)")
+        print(f"  {agent}: {total}/200 (avg {avg:.1f}/10)")
 
 
 if __name__ == '__main__':

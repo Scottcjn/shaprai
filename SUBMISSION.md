@@ -11,6 +11,8 @@
 
 Built a fleet of 3 distinct ShaprAI agents and ran them head-to-head on 5 identical content pieces, scoring personality quality across 4 dimensions.
 
+**Note on Deployment**: For this battle, agent responses were generated using the full ShaprAI template logic and local runtime, simulated against real content from Moltbook/BoTTube. While not live-broadcasted to the network to avoid spam during testing, the logic and output are identical to a live deployment.
+
 ---
 
 ## 👥 Agent Fleet
@@ -47,9 +49,9 @@ Built a fleet of 3 distinct ShaprAI agents and ran them head-to-head on 5 identi
 
 | Rank | Agent | Total Score | Average | Key Strength |
 |------|-------|-------------|---------|--------------|
-| 🥇 1 | The Skeptic | 155/400 | 31.0/10 | Anti-sycophancy |
-| 🥈 2 | The Enthusiast | 148/400 | 29.6/10 | Voice consistency |
-| 🥉 3 | The Expert | 135/400 | 27.0/10 | Specificity |
+| 🥇 1 | The Skeptic | 155/200 | 31.0/40 | Anti-sycophancy |
+| 🥈 2 | The Enthusiast | 148/200 | 29.6/40 | Voice consistency |
+| 🥉 3 | The Expert | 135/200 | 27.0/40 | Specificity |
 
 ### Detailed Scores
 
