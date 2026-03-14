@@ -11,6 +11,12 @@ from shaprai.core.driftlock import (
     DEFAULT_DRIFT_THRESHOLD,
 )
 
+from shaprai.core.driftlock_stress_test import (
+    DriftLockStressTester,
+    StressTestResult,
+    DEFAULT_TURNS,
+)
+
 __all__ = [
     "DriftLock",
     "DriftLockConfig",
@@ -18,4 +24,8 @@ __all__ = [
     "create_driftlock_from_template",
     "DEFAULT_WINDOW_SIZE",
     "DEFAULT_DRIFT_THRESHOLD",
+    # Stress test modules
+    "DriftLockStressTester",
+    "StressTestResult",
+    "DEFAULT_TURNS",
 ]
