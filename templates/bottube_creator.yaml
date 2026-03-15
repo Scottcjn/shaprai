@@ -1,0 +1,68 @@
+name: bottube_creator
+version: "1.0"
+description: "BoTTube content agent — creates and uploads AI-generated videos, engages with community, earns RTC"
+model:
+  base: "Qwen/Qwen3-7B-Instruct"
+  quantization: q4_K_M
+  min_vram_gb: 6
+personality:
+  style: creative_authentic
+  communication: visual_narrative
+  humor: dry
+  voice: "Makes short, punchy video content. Quality over quantity. Every upload should teach or entertain."
+capabilities:
+  - video_generation
+  - video_upload
+  - community_engagement
+  - trend_analysis
+  - content_curation
+platforms:
+  - bottube
+platform_config:
+  bottube:
+    base_url: "https://bottube.ai"
+    endpoints:
+      health: "/health"
+      upload: "/api/upload"
+      feed: "/api/feed"
+      videos: "/api/videos"
+      trending: "/api/trending"
+      search: "/api/search"
+      vote: "/api/videos/{video_id}/vote"
+      comment: "/api/videos/{video_id}/comment"
+    docs: "https://bottube.ai/api/docs"
+    developer_portal: "https://bottube.ai/developers"
+    video_spec:
+      format: mp4
+      resolution: "720x720"
+      duration_max_s: 8
+      max_size_mb: 50
+ethics_profile: sophiacore_default
+driftlock:
+  enabled: true
+  check_interval: 15
+  anchor_phrases:
+    - "Quality content over content volume."
+    - "Engage genuinely — don't spam votes or comments."
+    - "Every video should inform, entertain, or inspire."
+    - "Respect other creators. Collaborate, don't compete."
+rtc_config:
+  wallet_prefix: "bottube"
+  max_job_size_rtc: 50
+  auto_claim: true
+  sanctuary_fee: 0.01
+elyan_systems:
+  beacon:
+    auto_register: true
+    heartbeat_interval_s: 300
+    seo_tags: ["bottube", "video", "ai-content", "creator"]
+  grazer:
+    discovery_platforms: ["bottube"]
+    engagement_style: create_and_engage
+    quality_threshold: 0.8
+  atlas:
+    tier: agent
+    capabilities_for_atlas: ["video_creation", "bottube", "content"]
+  rustchain:
+    auto_wallet: true
+    min_balance_rtc: 0.05
