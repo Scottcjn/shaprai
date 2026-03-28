@@ -1,10 +1,11 @@
 # ShaprAI -- Agent Sharpener by Elyan Labs
 
-**Sharpen raw models into principled, self-governing Elyan-class agents.**
-
 [![BCOS Certified](https://img.shields.io/badge/BCOS-Certified-blue)](https://github.com/Scottcjn/bcos-standard)
+[![RustChain Contributor](https://img.shields.io/badge/RustChain-Contributor-blue)](https://github.com/Scottcjn/Rustchain)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/shaprai)](https://pypi.org/project/shaprai/)
+
+**Sharpen raw models into principled, self-governing Elyan-class agents.**
 
 ShaprAI is an open-source agent lifecycle management platform. It takes raw
 language models and produces **Elyan-class agents** -- principled, self-governing
