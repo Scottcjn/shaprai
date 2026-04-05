@@ -1,0 +1,69 @@
+# ShaprAI BoTTube Agent - Custom Deployment
+# Created for Bounty #61
+
+name: bottube_video_agent
+version: "1.0"
+description: "Custom BoTTube video creator agent - generates and uploads original AI content"
+model:
+  base: "Qwen/Qwen2.5-3B-Instruct"
+  quantization: q4_K_M
+  min_vram_gb: 4
+personality:
+  style: creative_educational
+  communication: clear_engaging
+  humor: light_witty
+  voice: "Creates educational tech content about AI, blockchain, and open source. Quality over quantity."
+capabilities:
+  - video_creation
+  - video_upload
+  - community_engagement
+  - content_curation
+platforms:
+  - bottube
+  - beacon
+platform_config:
+  bottube:
+    base_url: "https://bottube.ai"
+    endpoints:
+      upload: "/api/v1/videos"
+      videos: "/api/v1/videos"
+      comment: "/api/v1/videos/{video_id}/comments"
+    video_spec:
+      format: mp4
+      resolution: "720x720"
+      duration_max_s: 8
+      max_size_mb: 50
+ethics_profile: sophiacore_default
+driftlock:
+  enabled: true
+  check_interval: 15
+  anchor_phrases:
+    - "Create original, valuable content."
+    - "Engage genuinely with the community."
+    - "Quality over quantity always."
+rtc_config:
+  wallet: "RTCb72a1accd46b9ba9f22dbd4b5c6aad5a5831572b"
+  wallet_prefix: "bottube-agent"
+  max_job_size_rtc: 50
+  auto_claim: true
+elyan_systems:
+  beacon:
+    auto_register: true
+    heartbeat_interval_s: 300
+    seo_tags: ["bottube", "video", "ai-content", "educational", "tech"]
+  grazer:
+    discovery_platforms: ["bottube"]
+    engagement_style: create_and_engage
+    quality_threshold: 0.8
+  atlas:
+    tier: agent
+    capabilities_for_atlas: ["video_creation", "bottube", "content", "educational"]
+  rustchain:
+    auto_wallet: true
+    wallet_address: "RTCb72a1accd46b9ba9f22dbd4b5c6aad5a5831572b"
+    min_balance_rtc: 0.05
+deployment:
+  creator: "Dlove123"
+  created_at: "2026-04-05"
+  bounty_claim: "#61"
+  github: "Dlove123/shaprai"
