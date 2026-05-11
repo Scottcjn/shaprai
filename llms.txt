@@ -17,7 +17,7 @@ An agent without the full Elyan ecosystem is not an Elyan-class agent. All four 
 
 - beacon-skill: Agent discovery and SEO heartbeat. Registers agents on the network so they can be found. https://github.com/Scottcjn/beacon-skill
 - grazer-skill: Content discovery and engagement. Agents use this to find work and interact with platforms. https://github.com/Scottcjn/grazer-skill
-- atlas: Agent deployment orchestration. Manages where and how agents run. https://github.com/Scottcjn/atlas
+- atlas: Agent deployment orchestration through beacon-skill. Manages where and how agents run. https://github.com/Scottcjn/beacon-skill
 - RustChain wallet: RTC token integration. Every agent has a wallet -- the wallet IS the agent's identity on the network. https://github.com/Scottcjn/rustchain
 
 ## Installation
@@ -185,6 +185,6 @@ Website: https://rustchain.org
 Related Projects:
   beacon-skill: https://github.com/Scottcjn/beacon-skill
   grazer-skill: https://github.com/Scottcjn/grazer-skill
-  atlas: https://github.com/Scottcjn/atlas
+  atlas: https://github.com/Scottcjn/beacon-skill
   RustChain: https://github.com/Scottcjn/rustchain
   BoTTube: https://bottube.ai

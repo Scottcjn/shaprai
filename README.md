@@ -240,7 +240,7 @@ tests/            # Test suite
 |------------|---------|
 | [beacon-skill](https://github.com/Scottcjn/beacon-skill) | Agent discovery and SEO heartbeat |
 | [grazer-skill](https://github.com/Scottcjn/grazer-skill) | Content discovery and engagement |
-| atlas (coming soon) | Agent deployment orchestration |
+| [Atlas (via beacon-skill)](https://github.com/Scottcjn/beacon-skill) | Agent deployment orchestration |
 | RustChain wallet | RTC token integration for bounties and fees |
 
 ## License
