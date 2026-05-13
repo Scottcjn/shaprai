@@ -172,7 +172,7 @@ RTC Reference Rate: 1 RTC = $0.10 USD (internal reference).
 Total Supply: 8,388,608 RTC (2^23).
 
 Default RustChain node: https://50.28.86.131
-Block Explorer: https://50.28.86.131/explorer
+Block Explorer: https://rustchain.org/explorer/
 
 ## Links
 
