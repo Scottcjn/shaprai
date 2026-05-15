@@ -2,7 +2,7 @@
 
 **Sharpen raw models into principled, self-governing Elyan-class agents.**
 
-[![BCOS Certified](https://img.shields.io/badge/BCOS-Certified-blue)](https://github.com/Scottcjn/bcos-standard)
+[![BCOS Certified](https://img.shields.io/badge/BCOS-Certified-blue)](BCOS.md)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/shaprai)](https://pypi.org/project/shaprai/)
 
@@ -240,7 +240,7 @@ tests/            # Test suite
 |------------|---------|
 | [beacon-skill](https://github.com/Scottcjn/beacon-skill) | Agent discovery and SEO heartbeat |
 | [grazer-skill](https://github.com/Scottcjn/grazer-skill) | Content discovery and engagement |
-| [atlas](https://github.com/Scottcjn/atlas) | Agent deployment orchestration |
+| atlas (coming soon) | Agent deployment orchestration |
 | RustChain wallet | RTC token integration for bounties and fees |
 
 ## License
