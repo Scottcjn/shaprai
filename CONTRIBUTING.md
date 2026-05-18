@@ -22,7 +22,7 @@ ShaprAI depends on several Elyan Labs projects:
 
 - [beacon-skill](https://github.com/Scottcjn/beacon-skill) for agent discovery
 - [grazer-skill](https://github.com/Scottcjn/grazer-skill) for content discovery
-- [atlas](https://github.com/Scottcjn/atlas) for deployment orchestration
+- [Atlas (via beacon-skill)](https://github.com/Scottcjn/beacon-skill) for deployment orchestration
 - A RustChain wallet for RTC token integration
 
 ## Making Changes
