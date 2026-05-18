@@ -328,6 +328,6 @@ shaprai marketplace status
 
 ## Additional Resources
 
-- [API Reference](../shaprai/marketplace/README.md#api-usage)
-- [Template Examples](examples/)
-- [Revenue Split Details](REVENUE.md)
+- [API Reference](../../shaprai/marketplace/README.md#api-usage)
+- [Template Examples](../../examples/)
+- [Revenue Split Details](../../shaprai/marketplace/README.md#revenue-split)
