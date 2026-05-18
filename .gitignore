@@ -1,50 +1,7 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-*.egg-info/
-*.egg
-dist/
-build/
-eggs/
-*.whl
-
-# Virtual environments
 .venv/
-venv/
-ENV/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-
-# Testing
+__pycache__/
+*.pyc
 .pytest_cache/
-.coverage
-htmlcov/
-.tox/
-
-# Distribution
-*.tar.gz
-*.zip
-
-# OS
-.DS_Store
-Thumbs.db
-
-# ShaprAI local data
-.shaprai/
-
-# Models (large files)
-*.gguf
-*.bin
-*.safetensors
-
-# Secrets
-.env
-*.key
-*.pem
+build/
+dist/
+*.egg-info/

@@ -24,6 +24,8 @@ def mock_template():
         capabilities=["code_review"],
         platforms=["github"],
     )
+
+
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Elyan Labs — https://github.com/Scottcjn/shaprai
 """
@@ -47,40 +49,39 @@ Run all tests including live:
 """
 
 import os
-import pytest
-import responses
 from unittest.mock import MagicMock, patch
 
+import pytest
+import responses
+
 from shaprai.elyan_bus import (
-    ElyanBus,
-    ElyanAgent,
-    RUSTCHAIN_API,
     BEACON_RELAY,
     GAS_FEE_TEXT_RELAY,
-    SANCTUARY_SESSION_FEE,
     GRADUATION_FEE,
+    RUSTCHAIN_API,
+    SANCTUARY_SESSION_FEE,
+    ElyanAgent,
+    ElyanBus,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Pytest Configuration
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def pytest_configure(config):
     """Register custom markers for integration tests."""
     config.addinivalue_line(
         "markers", "integration: mark test as integration test (requires network)"
     )
-    config.addinivalue_line(
-        "markers", "slow: mark test as slow running"
-    )
+    config.addinivalue_line("markers", "slow: mark test as slow running")
 
 
 def pytest_collection_modifyitems(config, items):
     """Skip integration tests by default unless explicitly requested."""
     # Check if integration tests are explicitly requested via -m flag
     marker_expr = config.getoption("-m", default="")
-    
+
     # Only skip tests that are explicitly marked with @pytest.mark.integration
     # if integration is not in the marker expression
     if "integration" not in marker_expr:
@@ -97,11 +98,12 @@ def pytest_collection_modifyitems(config, items):
 # Mock Mode Fixtures
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def mock_rustchain():
     """
     Mock RustChain API responses.
-    
+
     Yields a responses mock context for RustChain endpoints.
     """
     with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
@@ -112,7 +114,7 @@ def mock_rustchain():
 def mock_bus():
     """
     ElyanBus instance for testing.
-    
+
     This fixture provides a clean bus instance. Individual tests
     should use mock_rustchain fixture to mock network calls.
     """
@@ -124,7 +126,7 @@ def mock_bus():
 def mock_agent(mock_bus):
     """
     Create a pre-registered mock agent for testing.
-    
+
     Returns an ElyanAgent with wallet and beacon IDs already set.
     """
     agent_name = "test_agent"
@@ -141,11 +143,12 @@ def mock_agent(mock_bus):
 # Live Mode Fixtures
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def live_bus():
     """
     ElyanBus instance for live integration testing.
-    
+
     WARNING: This fixture makes real network calls to Elyan endpoints.
     Only use with -m integration marker.
     """
@@ -158,6 +161,7 @@ def live_bus():
 def live_agent_name():
     """Generate a unique agent name for live testing."""
     import time
+
     return f"test_agent_{int(time.time())}"
 
 
@@ -165,9 +169,11 @@ def live_agent_name():
 # Utility Fixtures
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def caplog_setup(caplog):
     """Set up logging capture for tests."""
     import logging
+
     caplog.set_level(logging.DEBUG, logger="shaprai.bus")
     return caplog

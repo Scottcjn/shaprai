@@ -40,7 +40,9 @@ def test_check_prerequisites_returns_system_check_when_not_strict(monkeypatch):
 
 def test_check_prerequisites_strict_raises_on_failure(monkeypatch, capsys):
     monkeypatch.setattr(prerequisites, "_check_beacon", lambda: _status("beacon-skill"))
-    monkeypatch.setattr(prerequisites, "_check_grazer", lambda: _status("grazer-skill", ok=False))
+    monkeypatch.setattr(
+        prerequisites, "_check_grazer", lambda: _status("grazer-skill", ok=False)
+    )
     monkeypatch.setattr(prerequisites, "_check_atlas", lambda: _status("atlas"))
     monkeypatch.setattr(prerequisites, "_check_rustchain", lambda: _status("rustchain"))
 
@@ -53,7 +55,9 @@ def test_check_prerequisites_strict_raises_on_failure(monkeypatch, capsys):
 
 
 def test_require_elyan_ecosystem_returns_check_when_all_ok(monkeypatch, capsys):
-    monkeypatch.setattr(prerequisites, "check_prerequisites", lambda strict=False: _check(True))
+    monkeypatch.setattr(
+        prerequisites, "check_prerequisites", lambda strict=False: _check(True)
+    )
 
     result = prerequisites.require_elyan_ecosystem()
 
@@ -63,7 +67,9 @@ def test_require_elyan_ecosystem_returns_check_when_all_ok(monkeypatch, capsys):
 
 
 def test_require_elyan_ecosystem_exits_when_any_check_fails(monkeypatch, capsys):
-    monkeypatch.setattr(prerequisites, "check_prerequisites", lambda strict=False: _check(False))
+    monkeypatch.setattr(
+        prerequisites, "check_prerequisites", lambda strict=False: _check(False)
+    )
 
     with pytest.raises(SystemExit) as exc:
         prerequisites.require_elyan_ecosystem()

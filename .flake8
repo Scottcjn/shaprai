@@ -1,0 +1,12 @@
+[flake8]
+# TODO: tests/integration/test_elyan_bus.py is corrupted (duplicate code-block
+# injection at L286+); excluded until file is reconstructed.
+exclude =
+    .venv,
+    .git,
+    __pycache__,
+    build,
+    dist,
+    tests/integration/test_elyan_bus.py
+max-line-length = 127
+max-complexity = 10

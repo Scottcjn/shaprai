@@ -324,22 +324,22 @@ Test Coverage
 """
 
 import time
+from unittest.mock import MagicMock, patch
+
 import pytest
 import responses
-from unittest.mock import patch, MagicMock
 
 from shaprai.elyan_bus import (
-    ElyanBus,
-    ElyanAgent,
-    RUSTCHAIN_API,
     BEACON_RELAY,
-    GAS_FEE_TEXT_RELAY,
-    GAS_FEE_DISCOVERY,
     GAS_FEE_ATTACHMENT,
-    SANCTUARY_SESSION_FEE,
+    GAS_FEE_DISCOVERY,
+    GAS_FEE_TEXT_RELAY,
     GRADUATION_FEE,
+    RUSTCHAIN_API,
+    SANCTUARY_SESSION_FEE,
+    ElyanAgent,
+    ElyanBus,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Mock Response Builders
@@ -1659,7 +1659,7 @@ class TestLiveIntegration:
     def test_live_rustchain_connectivity(self, live_bus):
         """Test basic connectivity to RustChain API."""
         import requests
-        
+
         # Just check the endpoint is reachable
         try:
             resp = requests.get(

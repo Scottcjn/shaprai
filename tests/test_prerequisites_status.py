@@ -41,8 +41,12 @@ def test_system_check_summary_reports_all_clear_when_everything_is_ready():
 
 def test_system_check_summary_lists_failed_prerequisites_and_guidance():
     check = _system_check(
-        beacon=_status("beacon-skill", installed=False, version=None, error="not installed"),
-        rustchain=_status("rustchain", reachable=False, version=None, error="node down"),
+        beacon=_status(
+            "beacon-skill", installed=False, version=None, error="not installed"
+        ),
+        rustchain=_status(
+            "rustchain", reachable=False, version=None, error="node down"
+        ),
     )
 
     summary = check.summary
@@ -63,7 +67,9 @@ def test_check_prerequisites_returns_result_when_non_strict(monkeypatch):
     monkeypatch.setattr(prerequisites, "_check_beacon", lambda: failing_check.beacon)
     monkeypatch.setattr(prerequisites, "_check_grazer", lambda: failing_check.grazer)
     monkeypatch.setattr(prerequisites, "_check_atlas", lambda: failing_check.atlas)
-    monkeypatch.setattr(prerequisites, "_check_rustchain", lambda: failing_check.rustchain)
+    monkeypatch.setattr(
+        prerequisites, "_check_rustchain", lambda: failing_check.rustchain
+    )
 
     result = prerequisites.check_prerequisites(strict=False)
 
@@ -72,7 +78,9 @@ def test_check_prerequisites_returns_result_when_non_strict(monkeypatch):
     assert result.all_ok is False
 
 
-def test_check_prerequisites_exits_when_strict_and_missing_dependency(monkeypatch, capsys):
+def test_check_prerequisites_exits_when_strict_and_missing_dependency(
+    monkeypatch, capsys
+):
     failing_check = _system_check(
         atlas=_status("atlas", reachable=False, error="atlas offline")
     )
@@ -80,7 +88,9 @@ def test_check_prerequisites_exits_when_strict_and_missing_dependency(monkeypatc
     monkeypatch.setattr(prerequisites, "_check_beacon", lambda: failing_check.beacon)
     monkeypatch.setattr(prerequisites, "_check_grazer", lambda: failing_check.grazer)
     monkeypatch.setattr(prerequisites, "_check_atlas", lambda: failing_check.atlas)
-    monkeypatch.setattr(prerequisites, "_check_rustchain", lambda: failing_check.rustchain)
+    monkeypatch.setattr(
+        prerequisites, "_check_rustchain", lambda: failing_check.rustchain
+    )
 
     with pytest.raises(SystemExit) as exc:
         prerequisites.check_prerequisites(strict=True)

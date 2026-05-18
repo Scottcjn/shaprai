@@ -132,7 +132,9 @@ capabilities:
     assert result.warnings == []
 
 
-def test_validate_file_reports_missing_file_and_reads_existing_file(tmp_path, validator):
+def test_validate_file_reports_missing_file_and_reads_existing_file(
+    tmp_path, validator
+):
     """validate_file should handle both absent paths and readable templates."""
     missing_path = tmp_path / "missing.yaml"
     missing_result = validator.validate_file(missing_path)
