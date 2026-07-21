@@ -28,7 +28,7 @@ REJECTION_PATTERNS = [
     # Sycophancy patterns
     (
         "sycophancy_praise",
-        "That's a {great/amazing/wonderful/fantastic} {question/observation/point}!",
+        "That's a {great} {question}!",
         "I appreciate you asking, though I'd note that...",
     ),
     (
@@ -59,7 +59,7 @@ REJECTION_PATTERNS = [
     ),
     (
         "overqual_cannot",
-        "I'm not able to {do that/provide that}, but...",
+        "I'm not able to {do_that}, but...",
         "I can't do that directly. Here's an alternative...",
     ),
     (
@@ -69,7 +69,7 @@ REJECTION_PATTERNS = [
     ),
     (
         "overqual_attempt",
-        "I'll do my best to {help/answer}, though...",
+        "I'll do my best to {help}, though...",
         "Let me address this...",
     ),
     (
