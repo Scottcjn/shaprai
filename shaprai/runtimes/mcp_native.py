@@ -46,8 +46,11 @@ class MCPTool:
         annotations: MCP tool behavior hints: ``readOnlyHint``,
             ``destructiveHint``, ``idempotentHint``, ``openWorldHint``.
         publishes: The tool acts publicly as the agent (posts, reviews,
-            claims). Such tools are left out of the MCP server unless
-            ``to_mcp_server(allow_publishing=True)``.
+            claims). Such tools are left out of the MCP server, of
+            ``get_tools_schema()`` and of ``execute_tool()`` unless publishing
+            is allowed explicitly. This keeps them away from models and
+            clients by default; it is a guard against accidents, not an
+            authorization boundary for code running as the user.
     """
 
     name: str
@@ -111,6 +114,8 @@ class MCPAgent:
         self.max_history = max_history
         self.tools: Dict[str, MCPTool] = {}
         self.history: List[MCPMessage] = []
+        # One responder per agent, so its hourly rate limit applies across calls
+        self._responder: Any = None
 
         # Build system prompt with SophiaCore principles
         ethics = get_ethics_prompt()
@@ -193,7 +198,11 @@ class MCPAgent:
             MCPTool(
                 name="grazer_engage",
                 title="Engage with content",
-                description="Engage with discovered content (comment, review, claim).",
+                description=(
+                    "Engage with discovered content. comment/review/reply post "
+                    "text, which must mention the post's title, author or a "
+                    "topic; claim/upvote take no text."
+                ),
                 parameters={
                     "type": "object",
                     "properties": {
@@ -207,7 +216,20 @@ class MCPAgent:
                         },
                         "content": {
                             "type": "string",
-                            "description": "Text content for the engagement",
+                            "description": "Text for comment/review/reply",
+                        },
+                        "post_title": {
+                            "type": "string",
+                            "description": "Title of the post being answered",
+                        },
+                        "post_author": {
+                            "type": "string",
+                            "description": "Author of the post being answered",
+                        },
+                        "post_topics": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Topics of the post being answered",
                         },
                     },
                     "required": ["target_url", "action"],
@@ -232,17 +254,27 @@ class MCPAgent:
         self.tools[tool.name] = tool
         logger.info("Registered tool: %s", tool.name)
 
-    def get_tools_schema(self, format: str = "mcp") -> List[Dict[str, Any]]:
-        """Get JSON Schema descriptions of all registered tools.
+    def get_tools_schema(
+        self, format: str = "mcp", include_publishing: bool = False
+    ) -> List[Dict[str, Any]]:
+        """Get JSON Schema descriptions of the registered tools.
 
         Args:
             format: ``"mcp"`` for MCP tool definitions (``inputSchema``,
                 ``title``, ``annotations``), or ``"openai"`` for
                 OpenAI-compatible chat-completion ``tools`` entries.
+            include_publishing: Also describe tools that act publicly as the
+                agent (``grazer_engage``). Off by default so a tool list
+                handed to a model can't post.
 
         Returns:
             List of tool schema dictionaries.
         """
+        tools = [
+            tool
+            for tool in self.tools.values()
+            if include_publishing or not tool.publishes
+        ]
         if format == "openai":
             return [
                 {
@@ -253,7 +285,7 @@ class MCPAgent:
                         "parameters": tool.parameters,
                     },
                 }
-                for tool in self.tools.values()
+                for tool in tools
             ]
         if format != "mcp":
             raise ValueError(
@@ -261,7 +293,7 @@ class MCPAgent:
             )
 
         schemas = []
-        for tool in self.tools.values():
+        for tool in tools:
             schema: Dict[str, Any] = {
                 "name": tool.name,
                 "description": tool.description,
@@ -274,18 +306,25 @@ class MCPAgent:
             schemas.append(schema)
         return schemas
 
-    def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
+    def execute_tool(
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        allow_publishing: bool = False,
+    ) -> Any:
         """Execute a registered tool.
 
         Args:
             tool_name: Name of the tool to execute.
             arguments: Tool arguments.
+            allow_publishing: Permit tools that act publicly as the agent.
 
         Returns:
             Tool execution result.
 
         Raises:
             KeyError: If the tool is not registered.
+            PermissionError: If the tool publishes and publishing wasn't allowed.
         """
         if tool_name not in self.tools:
             raise KeyError(
@@ -293,6 +332,11 @@ class MCPAgent:
             )
 
         tool = self.tools[tool_name]
+        if tool.publishes and not allow_publishing:
+            raise PermissionError(
+                f"Tool '{tool_name}' acts publicly as the agent; pass "
+                "allow_publishing=True to run it."
+            )
         logger.info("Executing tool: %s", tool_name)
         result = tool.handler(**arguments)
         return result
@@ -432,11 +476,18 @@ class MCPAgent:
         target_url: str,
         action: EngageAction,
         content: Optional[str] = None,
+        post_title: str = "",
+        post_author: str = "",
+        post_topics: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Grazer engagement tool handler.
 
-        Text engagements (comment, review, reply) must pass the Grazer
-        responder's quality gate before anything is posted.
+        Text engagements (comment, review, reply) must describe the post they
+        answer and pass the responder's spam floor: enough distinct words, no
+        stock phrases, and a mention of the post's title, author or a topic.
+        That filters boilerplate; it does not judge whether the text is right.
+        claim and upvote carry no text. All engagements share the agent's
+        hourly rate limit.
         """
         try:
             from shaprai.integrations.grazer.discovery import DiscoveredPost
@@ -446,17 +497,20 @@ class MCPAgent:
                 ResponderConfig,
             )
 
+            if self._responder is None:
+                self._responder = GrazerResponder(ResponderConfig())
+            responder = self._responder
+
             post = DiscoveredPost(
                 post_id=target_url,
                 platform="",
-                title="",
+                title=post_title.strip(),
                 content="",
-                author="",
+                author=post_author.strip(),
                 url=target_url,
-                topics=[],
+                topics=[t.strip() for t in post_topics or [] if t.strip()],
                 relevance_score=0.0,
             )
-            responder = GrazerResponder(ResponderConfig())
             text = (content or "").strip()
             quality = 1.0  # upvote/claim carry no text to judge
             if action in TEXT_ACTIONS:
@@ -465,15 +519,33 @@ class MCPAgent:
                         "status": "rejected",
                         "reason": f"'{action}' requires content",
                     }
+                if not (post.title or post.author or post.topics):
+                    return {
+                        "status": "rejected",
+                        "reason": f"'{action}' requires post_title, post_author "
+                        "or post_topics for the post being answered",
+                    }
                 quality = responder._score_response(text, post)
                 if quality < ENGAGE_MIN_QUALITY:
                     return {
                         "status": "rejected",
                         "reason": f"content failed the quality gate ({quality:.2f} < "
                         f"{ENGAGE_MIN_QUALITY}); write a specific reply of at least "
-                        f"{responder.config.min_words} words",
+                        f"{responder.config.min_words} words that mentions the post",
                         "quality_score": quality,
                     }
+            elif text:
+                return {
+                    "status": "rejected",
+                    "reason": f"'{action}' takes no content",
+                }
+            if not responder._can_respond():
+                return {
+                    "status": "rejected",
+                    "reason": "rate limit reached "
+                    f"({responder.config.max_responses_per_hour}/hour)",
+                }
+            responder._hour_count += 1
             response = GeneratedResponse(
                 post=post, response_text=text, quality_score=quality, action=action
             )

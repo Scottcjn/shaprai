@@ -26,6 +26,9 @@ BANNED_PHRASES = [
     "great question",
 ]
 
+# Below this share of distinct words, a reply is mostly repetition
+MIN_DISTINCT_WORD_RATIO = 0.4
+
 
 @dataclass
 class GeneratedResponse:
@@ -172,9 +175,12 @@ class GrazerResponder:
         )
 
     def _score_response(self, text: str, post: DiscoveredPost) -> float:
-        """Score a response for quality.
+        """Score a response against a spam floor.
 
-        Checks word count, banned phrases, and specific references.
+        Checks length, banned phrases (each occurrence counts), repetition,
+        and that the text mentions the post's title, author or a topic. This
+        rejects boilerplate and filler; it is not a judgement of whether the
+        reply is correct or useful.
         """
         score = 1.0
         words = text.split()
@@ -186,14 +192,18 @@ class GrazerResponder:
 
         text_lower = text.lower()
         for phrase in BANNED_PHRASES:
-            if phrase in text_lower:
-                score -= 0.2
+            score -= 0.2 * text_lower.count(phrase)
+
+        # Padding a reply to length by repeating words ("lorem " * 50)
+        distinct = {w.strip(".,;:!?()\"'").lower() for w in words}
+        if words and len(distinct) / len(words) < MIN_DISTINCT_WORD_RATIO:
+            score -= 0.5
 
         if self.config.require_specific_reference:
-            has_reference = (
-                post.title.lower() in text_lower
-                or post.author.lower() in text_lower
-                or any(t.lower() in text_lower for t in post.topics)
+            # Empty fields must not count as a match ("" is in every string)
+            references = [post.title, post.author, *post.topics]
+            has_reference = any(
+                ref.strip() and ref.strip().lower() in text_lower for ref in references
             )
             if not has_reference:
                 score -= 0.3

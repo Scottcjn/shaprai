@@ -24,7 +24,9 @@ Pipeline:
      away from. On-policy pairs are kept only when a pairwise judge
      prefers the chosen reply in both presentation orders, which guards
      against the judge's position bias (Zheng et al. 2023,
-     arXiv:2306.05685).
+     arXiv:2306.05685). The judge is the teacher, which wrote the chosen
+     reply, so it is not protected against self-preference bias; use a
+     different judge model, or review the pairs, when that matters.
 4. **Filtering** with the corpus filters (quality, length matching,
    deduplication, decontamination against DriftLock prompts).
 """

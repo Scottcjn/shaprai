@@ -138,6 +138,29 @@ class TestGrazerResponder:
         )
         assert score < 0.8  # Should be penalized for banned phrases
 
+    @pytest.mark.parametrize(
+        "text", ["great post " * 30, "lorem " * 50, "ai_agents " + "x " * 50]
+    )
+    def test_score_rejects_filler(self, responder: GrazerResponder, text: str) -> None:
+        post = DiscoveredPost(
+            post_id="1",
+            platform="moltbook",
+            title="Test",
+            content="",
+            author="author",
+            url="u",
+            topics=["ai_agents"],
+            relevance_score=0.9,
+        )
+        assert responder._score_response(text, post) < 0.8
+
+    def test_empty_post_fields_are_not_a_reference(
+        self, responder: GrazerResponder
+    ) -> None:
+        post = DiscoveredPost("1", "", "", "", "", "u", [], 0.0)
+        text = " ".join(f"word{i}" for i in range(60))
+        assert responder._score_response(text, post) == pytest.approx(0.7)
+
     def test_response_history(
         self,
         responder: GrazerResponder,

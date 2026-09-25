@@ -164,6 +164,29 @@ class TestOpenAIChatFn:
         )
 
     @responses.activate
+    def test_openai_key_needs_https(self, monkeypatch):
+        monkeypatch.delenv("SHAPRAI_API_KEY", raising=False)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+        responses.add(
+            responses.POST,
+            "http://api.openai.com/v1/chat/completions",
+            json={"choices": [{"message": {"content": "hi"}}]},
+        )
+        openai_chat_fn("http://api.openai.com/v1", "m")([])
+        assert "Authorization" not in responses.calls[0].request.headers
+
+    @responses.activate
+    def test_empty_api_key_sends_none(self, monkeypatch):
+        monkeypatch.setenv("SHAPRAI_API_KEY", "sk-test")
+        responses.add(
+            responses.POST,
+            f"{ENDPOINT}/chat/completions",
+            json={"choices": [{"message": {"content": "hi"}}]},
+        )
+        openai_chat_fn(ENDPOINT, "m", api_key="")([])
+        assert "Authorization" not in responses.calls[0].request.headers
+
+    @responses.activate
     def test_no_auth_header_for_local_servers(self, monkeypatch):
         monkeypatch.delenv("SHAPRAI_API_KEY", raising=False)
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -228,6 +251,39 @@ class TestSynthesizeCommand:
         dry = run("train", "sable", "--phase", "sft", "--dry-run")
         seed = len(read_jsonl(SEED_SFT_PATH))
         assert f"Examples: {seed + 3}" in dry.output
+
+    @responses.activate
+    def test_teacher_key_stays_with_the_teacher(self, agents_dir, monkeypatch):
+        monkeypatch.setenv("SHAPRAI_API_KEY", "sk-teacher")
+        rejected = "http://localhost:9000/v1"
+        responses.add_callback(
+            responses.POST, f"{ENDPOINT}/chat/completions", self.teacher
+        )
+        responses.add(
+            responses.POST,
+            f"{rejected}/chat/completions",
+            json={"choices": [{"message": {"content": "Maybe the loop, maybe not."}}]},
+        )
+        result = run(
+            "synthesize", "sable", "--teacher-endpoint", ENDPOINT,
+            "--teacher-model", "teacher", "--rejected-endpoint", rejected,
+            "--count", "1", "--category", "helpfulness",
+        )  # fmt: skip
+        assert result.exit_code == 0, result.output
+
+        auth = {
+            call.request.url.split("/v1")[0]: call.request.headers.get("Authorization")
+            for call in responses.calls
+        }
+        assert auth["http://localhost:8000"] == "Bearer sk-teacher"
+        assert auth["http://localhost:9000"] is None
+
+    def test_train_warns_about_synthesized_data(self, agents_dir):
+        synth = agents_dir / "sable" / "data" / "synth_sft.jsonl"
+        synth.parent.mkdir(parents=True, exist_ok=True)
+        synth.write_text("")
+        result = run("train", "sable", "--phase", "sft", "--dry-run")
+        assert "Including synthesized data" in result.output
 
     def test_unknown_agent(self, agents_dir):
         result = run(

@@ -35,8 +35,33 @@ MANIFEST = {
 
 
 class TestMCPToolSchemas:
+    def test_publishing_tools_are_left_out_by_default(self):
+        agent = MCPAgent("sable")
+        for fmt in ("mcp", "openai"):
+            names = {
+                t.get("name") or t["function"]["name"]
+                for t in agent.get_tools_schema(format=fmt)
+            }
+            assert names == {"beacon_heartbeat", "grazer_discover"}
+
+    def test_execute_tool_refuses_publishing_by_default(self, monkeypatch):
+        from shaprai.integrations.grazer.responder import GrazerResponder
+
+        sent = []
+        monkeypatch.setattr(
+            GrazerResponder, "submit_response", lambda *a: sent.append(a) or {}
+        )
+        with pytest.raises(PermissionError):
+            MCPAgent("sable").execute_tool(
+                "grazer_engage", {"target_url": "u", "action": "upvote"}
+            )
+        assert sent == []
+
     def test_mcp_format(self):
-        tools = {t["name"]: t for t in MCPAgent("sable").get_tools_schema()}
+        tools = {
+            t["name"]: t
+            for t in MCPAgent("sable").get_tools_schema(include_publishing=True)
+        }
 
         engage = tools["grazer_engage"]
         assert engage["inputSchema"]["required"] == ["target_url", "action"]
@@ -154,6 +179,7 @@ class TestMCPServer:
                     "target_url": "https://github.com/o/r/pull/1",
                     "action": "review",
                     "content": REVIEW,
+                    "post_title": "Retry loop",
                 },
             )
             bad = await client.call_tool(
@@ -196,9 +222,11 @@ class TestEngageQualityGate:
         )
         return sent
 
-    def engage(self, **kwargs):
-        return MCPAgent("sable").execute_tool(
-            "grazer_engage", {"target_url": self.URL, **kwargs}
+    def engage(self, agent=None, **kwargs):
+        return (agent or MCPAgent("sable")).execute_tool(
+            "grazer_engage",
+            {"target_url": self.URL, "post_title": "Retry loop", **kwargs},
+            allow_publishing=True,
         )
 
     def test_text_actions_need_content(self, submitted):
@@ -219,6 +247,48 @@ class TestEngageQualityGate:
 
     def test_upvote_needs_no_text(self, submitted):
         assert self.engage(action="upvote") == {"status": "ok"}
+        assert submitted[0].response_text == ""
+
+    @pytest.mark.parametrize("action", ["claim", "upvote"])
+    def test_non_text_actions_refuse_content(self, submitted, action):
+        result = self.engage(action=action, content="BUY CHEAP RTC")
+        assert result["status"] == "rejected"
+        assert "takes no content" in result["reason"]
+        assert submitted == []
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "great post " * 30,
+            "lorem " * 50,
+            "x " * 50,
+            "Retry loop " + "lorem " * 50,
+        ],
+    )
+    def test_filler_is_rejected(self, submitted, content):
+        result = self.engage(action="review", content=content)
+        assert result["status"] == "rejected"
+        assert submitted == []
+
+    def test_text_needs_the_post_it_answers(self, submitted):
+        result = self.engage(action="review", content=REVIEW, post_title="")
+        assert result["status"] == "rejected"
+        assert "post_title" in result["reason"]
+        assert submitted == []
+
+    def test_text_must_mention_the_post(self, submitted):
+        result = self.engage(
+            action="review", content=REVIEW, post_title="Unrelated database schema"
+        )
+        assert result["status"] == "rejected"
+        assert submitted == []
+
+    def test_rate_limit_applies_across_calls(self, submitted):
+        agent = MCPAgent("sable")
+        results = [self.engage(agent, action="upvote") for _ in range(11)]
+        assert [r["status"] for r in results] == ["ok"] * 10 + ["rejected"]
+        assert "rate limit" in results[-1]["reason"]
+        assert len(submitted) == 10
 
 
 def test_mcp_server_requires_sdk(monkeypatch):

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -238,6 +239,21 @@ def train(
         return
 
     click.echo(f"Training '{name}' -- phase: {phase}, epochs: {epochs}")
+    if data is None:
+        from shaprai.training.dpo import SYNTH_PAIRS_FILE
+        from shaprai.training.sft import SYNTH_SFT_FILE
+
+        synth = (
+            agent_dir
+            / "data"
+            / (SYNTH_SFT_FILE if phase == "sft" else SYNTH_PAIRS_FILE)
+        )
+        if synth.exists():
+            click.echo(
+                f"Including synthesized data from {synth}; review it first "
+                "(delete the file to train on the seed corpus only).",
+                err=True,
+            )
 
     try:
         if phase == "sft":
@@ -391,6 +407,18 @@ def generate_sft(template_path: str, output_path: str, count: int) -> None:
     help="Model name at --rejected-endpoint (default: the agent's base model).",
 )
 @click.option(
+    "--teacher-api-key-env",
+    default="SHAPRAI_API_KEY",
+    show_default=True,
+    help="Environment variable holding the teacher endpoint's API key.",
+)
+@click.option(
+    "--rejected-api-key-env",
+    default=None,
+    help="Environment variable holding the --rejected-endpoint API key "
+    "(default: send no key there, so the teacher's key never leaves its host).",
+)
+@click.option(
     "--count",
     default=200,
     type=int,
@@ -409,13 +437,17 @@ def synthesize(
     teacher_model: str,
     rejected_endpoint: Optional[str],
     rejected_model: Optional[str],
+    teacher_api_key_env: str,
+    rejected_api_key_env: Optional[str],
     count: int,
     categories: tuple,
 ) -> None:
     """Distill persona-specific SFT and preference data from a teacher model.
 
     Writes data/synth_sft.jsonl and data/synth_pairs.jsonl in the agent's
-    directory; training includes them automatically alongside the seed corpus.
+    directory; training includes them automatically alongside the seed corpus,
+    so review them first. The teacher also judges on-policy pairs, so the
+    judge may favor its own replies (self-preference bias).
     """
     from shaprai.inference import openai_chat_fn
     from shaprai.training.dpo import SYNTH_PAIRS_FILE
@@ -431,14 +463,26 @@ def synthesize(
         sys.exit(1)
 
     manifest = get_agent_status(name, agents_dir=AGENTS_DIR)
+    # Each endpoint gets only its own key
     teacher = openai_chat_fn(
-        teacher_endpoint, teacher_model, temperature=0.8, max_tokens=1024
+        teacher_endpoint,
+        teacher_model,
+        api_key=os.environ.get(teacher_api_key_env) or None,
+        temperature=0.8,
+        max_tokens=1024,
     )
     rejected_fn = None
     if rejected_endpoint:
         base = rejected_model or (manifest.get("model") or {}).get("base", name)
+        rejected_key = (
+            os.environ.get(rejected_api_key_env, "") if rejected_api_key_env else ""
+        )
         rejected_fn = openai_chat_fn(
-            rejected_endpoint, base, temperature=0.8, max_tokens=1024
+            rejected_endpoint,
+            base,
+            api_key=rejected_key,
+            temperature=0.8,
+            max_tokens=1024,
         )
 
     click.echo(f"Synthesizing ~{count} prompts for '{name}' with {teacher_model}...")
