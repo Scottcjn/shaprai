@@ -74,6 +74,7 @@ def create_agent(
         "ethics_profile": template.ethics_profile,
         "driftlock": template.driftlock,
         "rtc_config": template.rtc_config,
+        "training": template.training,
         "created_at": time.time(),
         "updated_at": time.time(),
         "training_history": [],

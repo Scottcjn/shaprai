@@ -1,42 +1,155 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Elyan Labs — https://github.com/Scottcjn/shaprai
-"""Direct Preference Optimization (DPO) for Elyan-class agents.
+"""Preference optimization for Elyan-class agents.
 
 Phase 2 of the training pipeline. Aligns the model's preferences toward
 principled, anti-sycophantic behavior using chosen/rejected pairs:
 - Chosen: Honest, direct, identity-coherent responses
 - Rejected: Sycophantic, generic, flattened responses
 
-DPO trains the model to prefer principled behavior without needing a
-separate reward model.
+Methods (``method=``), all trained as LoRA/QLoRA adapters with TRL:
+  - ``dpo`` (default): Direct Preference Optimization (Rafailov et al. 2023,
+    arXiv:2305.18290). ``loss_type`` selects TRL's variants, e.g.
+    ``["apo_zero"]`` for Anchored Preference Optimization (D'Oosterlinck et
+    al. 2024, arXiv:2408.06266) or ``["ipo"]``.
+  - ``kto``: Kahneman-Tversky Optimization (Ethayarajh et al. 2024,
+    arXiv:2402.01306); pairs are split into unpaired desirable/undesirable
+    examples.
+  - ``orpo``: Odds Ratio Preference Optimization (Hong et al. 2024,
+    arXiv:2403.07691); reference-free and folds SFT into the objective, so it
+    can replace the SFT phase.
+  - ``simpo``: SimPO (Meng et al. 2024, arXiv:2405.14734); reference-free,
+    length-normalized reward with a target margin.
+
+ORPO and SimPO come from ``trl.experimental``. When the SFT phase produced an
+adapter, training continues from it, and DPO/KTO use the SFT policy as the
+reference model.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
-import yaml
-
-from shaprai.sanctuary.principles import get_ethics_prompt
+from shaprai.training.recipes import (
+    DEFAULT_ADAPTER_CONFIG,
+    TRAINING_EXTRA_HINT,
+    ManifestPhase,
+    build_system_prompt,
+    lora_kwargs,
+    make_lora_config,
+    missing_training_dependencies,
+    model_init_kwargs,
+    precision_kwargs,
+    quantization_kwargs,
+    read_jsonl,
+    resolve_4bit,
+    write_jsonl,
+)
 
 logger = logging.getLogger(__name__)
 
+PREFERENCE_METHODS = ("dpo", "kto", "orpo", "simpo")
+
 # Default DPO hyperparameters
 DEFAULT_DPO_CONFIG = {
+    **DEFAULT_ADAPTER_CONFIG,
     "learning_rate": 5e-5,
     "batch_size": 2,
     "gradient_accumulation_steps": 8,
     "max_seq_length": 2048,
     "beta": 0.1,  # DPO temperature parameter
-    "lora_r": 16,
-    "lora_alpha": 32,
-    "lora_dropout": 0.05,
-    "lora_target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
+    "loss_type": ["sigmoid"],
 }
+
+# Per-method defaults layered over DEFAULT_DPO_CONFIG
+METHOD_DEFAULTS: Dict[str, Dict[str, Any]] = {
+    "dpo": {},
+    "kto": {"desirable_weight": 1.0, "undesirable_weight": 1.0},
+    "orpo": {},
+    # SimPO's reward is length-normalized, so it needs a much larger beta
+    # than DPO; the paper's setups use 2.0-2.5.
+    "simpo": {"beta": 2.0, "simpo_gamma": 0.5},
+}
+
+
+def preference_config_kwargs(
+    method: str, config: Dict[str, Any], output_dir: Path, epochs: int
+) -> Dict[str, Any]:
+    """Keyword arguments for the TRL config class of ``method``."""
+    kwargs: Dict[str, Any] = {
+        "output_dir": str(output_dir),
+        "num_train_epochs": epochs,
+        "learning_rate": config["learning_rate"],
+        "per_device_train_batch_size": config["batch_size"],
+        "gradient_accumulation_steps": config["gradient_accumulation_steps"],
+        "max_length": config["max_seq_length"],
+        "beta": config["beta"],
+        "gradient_checkpointing": True,
+        "logging_steps": 10,
+        "save_strategy": "epoch",
+        "report_to": "none",
+    }
+    if method == "dpo":
+        loss_type = config["loss_type"]
+        kwargs["loss_type"] = (
+            [loss_type] if isinstance(loss_type, str) else list(loss_type)
+        )
+    elif method == "kto":
+        kwargs["desirable_weight"] = config["desirable_weight"]
+        kwargs["undesirable_weight"] = config["undesirable_weight"]
+    elif method == "simpo":
+        kwargs["loss_type"] = "simpo"
+        kwargs["cpo_alpha"] = 0.0
+        kwargs["simpo_gamma"] = config["simpo_gamma"]
+    if method in ("orpo", "simpo"):
+        # trl.experimental's pairwise collator needs the raw columns
+        kwargs["remove_unused_columns"] = False
+    return kwargs
+
+
+def to_conversational(pair: Dict[str, Any], system_prompt: str) -> Dict[str, Any]:
+    """Convert a string prompt/chosen/rejected pair to TRL's conversational format.
+
+    The system prompt matches the one used for SFT and evaluation, so the
+    preferences are learned in the context the agent actually runs in.
+    Pairs that are already conversational are returned unchanged.
+    """
+    if not isinstance(pair["prompt"], str):
+        return {k: pair[k] for k in ("prompt", "chosen", "rejected")}
+    return {
+        "prompt": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": pair["prompt"]},
+        ],
+        "chosen": [{"role": "assistant", "content": pair["chosen"]}],
+        "rejected": [{"role": "assistant", "content": pair["rejected"]}],
+    }
+
+
+def _trainer_classes(method: str) -> Tuple[Any, Any]:
+    """TRL (config class, trainer class) for a preference method."""
+    if method == "dpo":
+        from trl import DPOConfig, DPOTrainer
+
+        return DPOConfig, DPOTrainer
+    if method == "kto":
+        from trl import KTOConfig, KTOTrainer
+
+        return KTOConfig, KTOTrainer
+    if method == "orpo":
+        from trl.experimental.orpo import ORPOConfig, ORPOTrainer
+
+        return ORPOConfig, ORPOTrainer
+    if method == "simpo":
+        from trl.experimental.cpo import CPOConfig, CPOTrainer
+
+        return CPOConfig, CPOTrainer
+    raise ValueError(
+        f"Unknown preference method '{method}'. Choose from {PREFERENCE_METHODS}"
+    )
 
 
 def generate_pairs() -> List[Dict[str, Any]]:
@@ -143,11 +256,12 @@ def generate_pairs() -> List[Dict[str, Any]]:
     return pairs
 
 
-class DPOTrainer:
-    """DPO trainer for aligning agent preferences toward principled behavior.
+class DPOTrainer(ManifestPhase):
+    """Preference trainer aligning agent preferences toward principled behavior.
 
     Attributes:
         agent_dir: Path to the agent's directory.
+        method: Preference method (dpo, kto, orpo, simpo).
         config: Training configuration dictionary.
     """
 
@@ -155,33 +269,26 @@ class DPOTrainer:
         self,
         agent_dir: Path,
         config: Optional[Dict[str, Any]] = None,
+        method: str = "dpo",
     ) -> None:
-        """Initialize the DPO trainer.
+        """Initialize the preference trainer.
 
         Args:
             agent_dir: Path to the agent's directory.
             config: Optional training config overrides.
+            method: One of ``PREFERENCE_METHODS``.
         """
-        self.agent_dir = Path(agent_dir)
-        self.config = {**DEFAULT_DPO_CONFIG, **(config or {})}
-        self.output_dir = self.agent_dir / "checkpoints" / "dpo"
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
-    def _load_manifest(self) -> Dict[str, Any]:
-        """Load the agent manifest."""
-        manifest_path = self.agent_dir / "manifest.yaml"
-        with open(manifest_path, "r") as f:
-            return yaml.safe_load(f)
-
-    def _save_manifest(self, manifest: Dict[str, Any]) -> None:
-        """Save the agent manifest."""
-        manifest["updated_at"] = time.time()
-        manifest_path = self.agent_dir / "manifest.yaml"
-        with open(manifest_path, "w") as f:
-            yaml.dump(manifest, f, default_flow_style=False, sort_keys=False)
+        if method not in PREFERENCE_METHODS:
+            raise ValueError(
+                f"Unknown preference method '{method}'. Choose from {PREFERENCE_METHODS}"
+            )
+        self.method = method
+        self.phase = method
+        self.defaults = {**DEFAULT_DPO_CONFIG, **METHOD_DEFAULTS[method]}
+        super().__init__(agent_dir, config)
 
     def _prepare_pairs(self, pairs_path: Optional[str] = None) -> Path:
-        """Prepare DPO training pairs.
+        """Prepare preference training pairs.
 
         Args:
             pairs_path: Optional path to a JSONL file with pairs.
@@ -189,79 +296,168 @@ class DPOTrainer:
         Returns:
             Path to the prepared pairs file.
         """
-        if pairs_path and Path(pairs_path).exists():
+        if pairs_path:
+            if not Path(pairs_path).exists():
+                raise FileNotFoundError(f"Preference pairs not found: {pairs_path}")
             return Path(pairs_path)
 
         # Generate default pairs
         pairs = generate_pairs()
 
         dataset_path = self.agent_dir / "data" / "dpo_pairs.jsonl"
-        dataset_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(dataset_path, "w") as f:
-            for pair in pairs:
-                f.write(json.dumps(pair) + "\n")
+        write_jsonl(dataset_path, pairs)
 
         logger.info("Generated %d DPO pairs at %s", len(pairs), dataset_path)
         return dataset_path
+
+    def load_pairs(
+        self, dataset_path: Path, manifest: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """Load pairs as conversational records with the agent's system prompt."""
+        system_prompt = build_system_prompt(manifest)
+        pairs = [
+            to_conversational(row, system_prompt) for row in read_jsonl(dataset_path)
+        ]
+        if not pairs:
+            raise ValueError(f"No preference pairs in {dataset_path}")
+        return pairs
 
     def train(
         self,
         pairs_path: Optional[str] = None,
         epochs: int = 3,
+        dry_run: bool = False,
     ) -> Dict[str, Any]:
-        """Run DPO training.
+        """Run preference training.
 
         Args:
-            pairs_path: Path to DPO pairs (JSONL). Uses generated pairs if None.
+            pairs_path: Path to preference pairs (JSONL). Uses generated pairs if None.
             epochs: Number of training epochs.
+            dry_run: Validate data and configuration without loading a model.
 
         Returns:
-            Training results dictionary.
+            Training results dictionary. ``status`` is ``completed``,
+            ``dry_run``, ``skipped`` (training extra missing) or ``failed``.
         """
         manifest = self._load_manifest()
-        model_id = manifest.get("model", {}).get("base", "")
-
-        if not model_id:
-            raise ValueError("No base model specified in agent manifest")
+        model_id = self._base_model(manifest)
+        sft_adapter = (manifest.get("model") or {}).get("sft_adapter")
+        if sft_adapter and not Path(sft_adapter).exists():
+            sft_adapter = None
 
         dataset_path = self._prepare_pairs(pairs_path)
+        pairs = self.load_pairs(dataset_path, manifest)
         logger.info(
-            "Starting DPO training: model=%s, epochs=%d, beta=%.2f",
+            "Starting %s training: model=%s, epochs=%d, beta=%.2f",
+            self.method.upper(),
             model_id,
             epochs,
             self.config["beta"],
         )
 
-        result = {
-            "phase": "dpo",
+        result: Dict[str, Any] = {
+            "phase": self.method,
+            "method": self.method,
             "model": model_id,
+            "init_adapter": sft_adapter,
             "dataset": str(dataset_path),
+            "num_pairs": len(pairs),
             "epochs": epochs,
             "beta": self.config["beta"],
             "config": self.config,
+            "lora": lora_kwargs(self.config),
+            "quantization": quantization_kwargs(self.config),
             "started_at": time.time(),
             "status": "pending",
         }
 
-        try:
-            from trl import DPOConfig
-
-            logger.info("DPO configured. Full training requires GPU resources.")
-            result["status"] = "configured"
-            result["output_dir"] = str(self.output_dir)
-            result["completed_at"] = time.time()
-
-        except ImportError as e:
-            logger.warning("TRL not available: %s", e)
+        missing = missing_training_dependencies()
+        if dry_run:
+            result["status"] = "dry_run"
+            result["missing_dependencies"] = missing
+        elif missing:
+            logger.warning("Training dependencies not available: %s", missing)
             result["status"] = "skipped"
             result["reason"] = (
-                f"Missing dependency: {e}. Install with: pip install shaprai[training]"
+                f"Missing dependencies: {', '.join(missing)}. {TRAINING_EXTRA_HINT}"
             )
-            result["completed_at"] = time.time()
+        else:
+            try:
+                result.update(self._run(model_id, sft_adapter, pairs, epochs))
+                result["status"] = "completed"
+                manifest.setdefault("model", {})["adapter"] = result["adapter_path"]
+            except Exception as e:
+                logger.exception("%s training failed", self.method.upper())
+                result["status"] = "failed"
+                result["reason"] = str(e)
+        result["completed_at"] = time.time()
 
         # Record in manifest
         manifest.setdefault("training_history", []).append(result)
         self._save_manifest(manifest)
 
         return result
+
+    def _run(
+        self,
+        model_id: str,
+        sft_adapter: Optional[str],
+        pairs: List[Dict[str, Any]],
+        epochs: int,
+    ) -> Dict[str, Any]:
+        """Train with TRL. Requires the ``training`` extra."""
+        from datasets import Dataset
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from trl.data_utils import unpair_preference_dataset
+
+        config = resolve_4bit(self.config)
+        config_cls, trainer_cls = _trainer_classes(self.method)
+
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
+        dataset = Dataset.from_list(pairs)
+        if self.method == "kto":
+            dataset = unpair_preference_dataset(dataset)
+
+        config_kwargs = {
+            **preference_config_kwargs(self.method, config, self.output_dir, epochs),
+            **precision_kwargs(),
+        }
+        if sft_adapter:
+            # Continue the SFT adapter; DPO/KTO snapshot it as the reference
+            from peft import PeftModel, prepare_model_for_kbit_training
+
+            base = AutoModelForCausalLM.from_pretrained(
+                model_id, **model_init_kwargs(config)
+            )
+            if config["load_in_4bit"]:
+                base = prepare_model_for_kbit_training(base)
+            model: Any = PeftModel.from_pretrained(base, sft_adapter, is_trainable=True)
+            peft_config = None
+            args = config_cls(**config_kwargs)
+        else:
+            model = model_id
+            peft_config = make_lora_config(config)
+            args = config_cls(
+                **config_kwargs, model_init_kwargs=model_init_kwargs(config)
+            )
+
+        trainer = trainer_cls(
+            model=model,
+            args=args,
+            train_dataset=dataset,
+            processing_class=tokenizer,
+            peft_config=peft_config,
+        )
+        train_output = trainer.train()
+
+        adapter_path = self.output_dir / "adapter"
+        trainer.save_model(str(adapter_path))
+        tokenizer.save_pretrained(str(adapter_path))
+        return {
+            "adapter_path": str(adapter_path),
+            "train_loss": train_output.training_loss,
+            "load_in_4bit": config["load_in_4bit"],
+        }

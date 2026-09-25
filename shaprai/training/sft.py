@@ -9,78 +9,90 @@ on curated conversations that demonstrate Elyan-class behavior:
 - Principled disagreement
 - Biblical ethical foundations
 
-Uses QLoRA for memory-efficient training on consumer hardware.
+Runs TRL's ``SFTTrainer`` with QLoRA (4-bit NF4 base, LoRA on all linear
+layers) on conversational data, computing the loss on assistant turns only
+so the model learns the agent's replies rather than the prompts. The
+resulting adapter becomes the starting point and reference model for the
+preference phase.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-import yaml
-
-from shaprai.sanctuary.principles import get_ethics_prompt
+from shaprai.training.recipes import (
+    DEFAULT_ADAPTER_CONFIG,
+    TRAINING_EXTRA_HINT,
+    ManifestPhase,
+    build_system_prompt,
+    lora_kwargs,
+    make_lora_config,
+    missing_training_dependencies,
+    model_init_kwargs,
+    precision_kwargs,
+    quantization_kwargs,
+    read_jsonl,
+    resolve_4bit,
+    write_jsonl,
+)
 
 logger = logging.getLogger(__name__)
 
 # Default SFT hyperparameters
 DEFAULT_SFT_CONFIG = {
+    **DEFAULT_ADAPTER_CONFIG,
     "learning_rate": 2e-4,
     "batch_size": 4,
     "gradient_accumulation_steps": 4,
     "max_seq_length": 2048,
-    "lora_r": 16,
-    "lora_alpha": 32,
-    "lora_dropout": 0.05,
-    "lora_target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
     "warmup_ratio": 0.03,
     "weight_decay": 0.01,
-    "identity_weight": 2.0,  # Extra weight on identity-critical tokens
+    "lr_scheduler_type": "cosine",
+    "assistant_only_loss": True,
+    "packing": False,
 }
 
 
-class SFTTrainer:
+def sft_config_kwargs(
+    config: Dict[str, Any], output_dir: Path, epochs: int
+) -> Dict[str, Any]:
+    """Keyword arguments for ``trl.SFTConfig``."""
+    return {
+        "output_dir": str(output_dir),
+        "num_train_epochs": epochs,
+        "learning_rate": config["learning_rate"],
+        "per_device_train_batch_size": config["batch_size"],
+        "gradient_accumulation_steps": config["gradient_accumulation_steps"],
+        "max_length": config["max_seq_length"],
+        # transformers>=5 takes a float in [0, 1) here as a warmup ratio
+        "warmup_steps": config["warmup_ratio"],
+        "weight_decay": config["weight_decay"],
+        "lr_scheduler_type": config["lr_scheduler_type"],
+        "assistant_only_loss": config["assistant_only_loss"],
+        "packing": config["packing"],
+        "gradient_checkpointing": True,
+        "logging_steps": 10,
+        "save_strategy": "epoch",
+        "report_to": "none",
+    }
+
+
+class SFTTrainer(ManifestPhase):
     """Supervised Fine-Tuning trainer for Elyan-class agents.
 
-    Wraps the SophiaCore SFT pipeline with QLoRA for efficient
-    training on consumer GPUs.
+    Wraps TRL's SFTTrainer with QLoRA for efficient training on consumer
+    GPUs.
 
     Attributes:
         agent_dir: Path to the agent's directory.
         config: Training configuration dictionary.
     """
 
-    def __init__(
-        self,
-        agent_dir: Path,
-        config: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        """Initialize the SFT trainer.
-
-        Args:
-            agent_dir: Path to the agent's directory.
-            config: Optional training config overrides.
-        """
-        self.agent_dir = Path(agent_dir)
-        self.config = {**DEFAULT_SFT_CONFIG, **(config or {})}
-        self.output_dir = self.agent_dir / "checkpoints" / "sft"
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-
-    def _load_manifest(self) -> Dict[str, Any]:
-        """Load the agent manifest."""
-        manifest_path = self.agent_dir / "manifest.yaml"
-        with open(manifest_path, "r") as f:
-            return yaml.safe_load(f)
-
-    def _save_manifest(self, manifest: Dict[str, Any]) -> None:
-        """Save the agent manifest."""
-        manifest["updated_at"] = time.time()
-        manifest_path = self.agent_dir / "manifest.yaml"
-        with open(manifest_path, "w") as f:
-            yaml.dump(manifest, f, default_flow_style=False, sort_keys=False)
+    phase = "sft"
+    defaults = DEFAULT_SFT_CONFIG
 
     def _prepare_dataset(self, data_path: Optional[str] = None) -> Path:
         """Prepare the SFT dataset.
@@ -94,12 +106,14 @@ class SFTTrainer:
         Returns:
             Path to the prepared dataset.
         """
-        if data_path and Path(data_path).exists():
+        if data_path:
+            if not Path(data_path).exists():
+                raise FileNotFoundError(f"SFT data not found: {data_path}")
             return Path(data_path)
 
         # Generate a synthetic dataset from principles
         manifest = self._load_manifest()
-        ethics_prompt = get_ethics_prompt()
+        ethics_prompt = build_system_prompt(manifest)
 
         synthetic_data = []
 
@@ -167,11 +181,7 @@ class SFTTrainer:
         )
 
         dataset_path = self.agent_dir / "data" / "sft_train.jsonl"
-        dataset_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(dataset_path, "w") as f:
-            for entry in synthetic_data:
-                f.write(json.dumps(entry) + "\n")
+        write_jsonl(dataset_path, synthetic_data)
 
         logger.info(
             "Generated synthetic SFT dataset: %d examples at %s",
@@ -180,76 +190,79 @@ class SFTTrainer:
         )
         return dataset_path
 
+    @staticmethod
+    def load_records(dataset_path: Path) -> List[Dict[str, Any]]:
+        """Load conversational SFT records, keeping only the ``messages`` field.
+
+        ``sft_generator`` output also carries ``text``/``weight``/``category``
+        columns, which would otherwise confuse TRL's format detection.
+        """
+        records = [{"messages": row["messages"]} for row in read_jsonl(dataset_path)]
+        if not records:
+            raise ValueError(f"No SFT examples in {dataset_path}")
+        return records
+
     def train(
         self,
         data_path: Optional[str] = None,
         epochs: int = 3,
+        dry_run: bool = False,
     ) -> Dict[str, Any]:
         """Run SFT training.
 
         Args:
-            data_path: Path to training data (JSONL). Uses synthetic data if None.
+            data_path: Path to training data (JSONL with ``messages``). Uses
+                synthetic data if None.
             epochs: Number of training epochs.
+            dry_run: Validate data and configuration without loading a model.
 
         Returns:
-            Training results dictionary.
+            Training results dictionary. ``status`` is ``completed``,
+            ``dry_run``, ``skipped`` (training extra missing) or ``failed``.
         """
         manifest = self._load_manifest()
-        model_id = manifest.get("model", {}).get("base", "")
-
-        if not model_id:
-            raise ValueError("No base model specified in agent manifest")
+        model_id = self._base_model(manifest)
 
         dataset_path = self._prepare_dataset(data_path)
+        records = self.load_records(dataset_path)
         logger.info("Starting SFT training: model=%s, epochs=%d", model_id, epochs)
 
-        result = {
+        result: Dict[str, Any] = {
             "phase": "sft",
             "model": model_id,
             "dataset": str(dataset_path),
+            "num_examples": len(records),
             "epochs": epochs,
             "config": self.config,
+            "lora": lora_kwargs(self.config),
+            "quantization": quantization_kwargs(self.config),
             "started_at": time.time(),
             "status": "pending",
         }
 
-        try:
-            from peft import LoraConfig, TaskType, get_peft_model
-            from transformers import AutoModelForCausalLM, AutoTokenizer
-
-            logger.info("Loading model: %s", model_id)
-            tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-            if tokenizer.pad_token is None:
-                tokenizer.pad_token = tokenizer.eos_token
-
-            # Configure QLoRA
-            lora_config = LoraConfig(
-                r=self.config["lora_r"],
-                lora_alpha=self.config["lora_alpha"],
-                lora_dropout=self.config["lora_dropout"],
-                target_modules=self.config["lora_target_modules"],
-                task_type=TaskType.CAUSAL_LM,
-            )
-
-            logger.info(
-                "QLoRA config: r=%d, alpha=%d", lora_config.r, lora_config.lora_alpha
-            )
-            result["status"] = "configured"
-
-            # In production, this would load the model, apply LoRA, and train.
-            # For the scaffold, we record the configuration.
-            logger.info(
-                "SFT training configured. Full training requires GPU resources."
-            )
-            result["status"] = "configured"
-            result["output_dir"] = str(self.output_dir)
-            result["completed_at"] = time.time()
-
-        except ImportError as e:
-            logger.warning("Training dependencies not available: %s", e)
+        missing = missing_training_dependencies()
+        if dry_run:
+            result["status"] = "dry_run"
+            result["missing_dependencies"] = missing
+        elif missing:
+            logger.warning("Training dependencies not available: %s", missing)
             result["status"] = "skipped"
-            result["reason"] = f"Missing dependency: {e}"
-            result["completed_at"] = time.time()
+            result["reason"] = (
+                f"Missing dependencies: {', '.join(missing)}. {TRAINING_EXTRA_HINT}"
+            )
+        else:
+            try:
+                result.update(self._run(model_id, records, epochs))
+                result["status"] = "completed"
+                model_entry = manifest.setdefault("model", {})
+                model_entry["sft_adapter"] = model_entry["adapter"] = result[
+                    "adapter_path"
+                ]
+            except Exception as e:
+                logger.exception("SFT training failed")
+                result["status"] = "failed"
+                result["reason"] = str(e)
+        result["completed_at"] = time.time()
 
         # Record in manifest
         manifest.setdefault("training_history", []).append(result)
@@ -257,3 +270,52 @@ class SFTTrainer:
         self._save_manifest(manifest)
 
         return result
+
+    def _run(
+        self, model_id: str, records: List[Dict[str, Any]], epochs: int
+    ) -> Dict[str, Any]:
+        """Train with TRL. Requires the ``training`` extra."""
+        from datasets import Dataset
+        from transformers import AutoTokenizer
+        from trl import SFTConfig
+        from trl import SFTTrainer as TRLSFTTrainer
+        from trl.chat_template_utils import get_training_chat_template
+
+        config = resolve_4bit(self.config)
+        tokenizer = AutoTokenizer.from_pretrained(model_id)
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
+        if config["assistant_only_loss"]:
+            try:
+                get_training_chat_template(tokenizer)
+            except ValueError:
+                logger.warning(
+                    "No assistant-mask chat template for %s; training on full sequences",
+                    model_id,
+                )
+                config = {**config, "assistant_only_loss": False}
+
+        args = SFTConfig(
+            **sft_config_kwargs(config, self.output_dir, epochs),
+            **precision_kwargs(),
+            model_init_kwargs=model_init_kwargs(config),
+        )
+        trainer = TRLSFTTrainer(
+            model=model_id,
+            args=args,
+            train_dataset=Dataset.from_list(records),
+            processing_class=tokenizer,
+            peft_config=make_lora_config(config),
+        )
+        train_output = trainer.train()
+
+        adapter_path = self.output_dir / "adapter"
+        trainer.save_model(str(adapter_path))
+        tokenizer.save_pretrained(str(adapter_path))
+        return {
+            "adapter_path": str(adapter_path),
+            "train_loss": train_output.training_loss,
+            "assistant_only_loss": config["assistant_only_loss"],
+            "load_in_4bit": config["load_in_4bit"],
+        }

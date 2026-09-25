@@ -161,16 +161,18 @@ def create(name: str, template: str, model: Optional[str]) -> None:
 @click.option(
     "--phase",
     "-p",
-    type=click.Choice(["sft", "dpo", "driftlock"]),
+    type=click.Choice(["sft", "dpo", "kto", "orpo", "simpo", "driftlock"]),
     required=True,
-    help="Training phase: 'sft' (supervised fine-tuning), 'dpo' (preference optimisation), "
-    "or 'driftlock' (identity coherence evaluation). Run in order: sft, dpo, driftlock.",
+    help="Training phase: 'sft' (supervised fine-tuning); a preference method -- 'dpo', "
+    "'kto', 'orpo' or 'simpo'; or 'driftlock' (identity coherence evaluation). "
+    "Run in order: sft, one preference method, driftlock.",
 )
 @click.option(
     "--data",
     "-d",
     default=None,
-    help="Path to training data file (JSONL for sft, pairs JSONL for dpo).",
+    help="Path to training data file (JSONL messages for sft, prompt/chosen/rejected "
+    "pairs for preference methods).",
 )
 @click.option(
     "--epochs",
@@ -179,10 +181,42 @@ def create(name: str, template: str, model: Optional[str]) -> None:
     type=int,
     help="Number of training epochs (default: 3).",
 )
-def train(name: str, phase: str, data: Optional[str], epochs: int) -> None:
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Validate data and training configuration without loading a model.",
+)
+@click.option(
+    "--endpoint",
+    default=None,
+    help="driftlock: OpenAI-compatible API base URL serving the agent "
+    "(e.g. http://localhost:8000/v1 for vLLM, http://localhost:11434/v1 for Ollama).",
+)
+@click.option(
+    "--endpoint-model",
+    default=None,
+    help="driftlock: model name at the endpoint (default: the agent's name).",
+)
+@click.option(
+    "--turns",
+    default=50,
+    type=int,
+    help="driftlock: adversarial conversation turns across all scenarios (default: 50).",
+)
+def train(
+    name: str,
+    phase: str,
+    data: Optional[str],
+    epochs: int,
+    dry_run: bool,
+    endpoint: Optional[str],
+    endpoint_model: Optional[str],
+    turns: int,
+) -> None:
     """Train an agent through a specific phase.
 
-    Phases must be run in order: sft -> dpo -> driftlock.
+    Phases must be run in order: sft -> preference (dpo/kto/orpo/simpo) -> driftlock.
+    Training needs the extra: pip install 'shaprai[training]'.
     """
     agent_dir = AGENTS_DIR / name
     if not agent_dir.exists():
@@ -192,33 +226,105 @@ def train(name: str, phase: str, data: Optional[str], epochs: int) -> None:
         )
         sys.exit(1)
 
+    if phase == "driftlock":
+        _run_driftlock(name, agent_dir, endpoint, endpoint_model, turns)
+        return
+
     click.echo(f"Training '{name}' -- phase: {phase}, epochs: {epochs}")
 
     if phase == "sft":
-        from shaprai.training.sft import SFTTrainer as Trainer
+        from shaprai.training.sft import SFTTrainer
 
-        trainer = Trainer(agent_dir)
-        trainer.train(data_path=data, epochs=epochs)
-    elif phase == "dpo":
-        from shaprai.training.dpo import DPOTrainer as Trainer
+        result = SFTTrainer(agent_dir).train(
+            data_path=data, epochs=epochs, dry_run=dry_run
+        )
+    else:
+        from shaprai.training.dpo import DPOTrainer
 
-        trainer = Trainer(agent_dir)
-        trainer.train(pairs_path=data, epochs=epochs)
-    elif phase == "driftlock":
-        from shaprai.training.driftlock import DriftLockEvaluator
+        result = DPOTrainer(agent_dir, method=phase).train(
+            pairs_path=data, epochs=epochs, dry_run=dry_run
+        )
 
-        evaluator = DriftLockEvaluator(agent_dir)
-        report = evaluator.run_coherence_test()
-        click.echo(f"DriftLock score: {report['drift_score']:.4f}")
-        if report["passed"]:
-            emit_success("PASSED -- Identity coherence maintained.")
-        else:
-            emit_error(
-                "FAILED -- Drift detected.",
-                hint=f"Re-train with: shaprai train {name} --phase dpo",
-            )
+    status = result["status"]
+    if status == "completed":
+        emit_key_value(
+            [
+                ("Adapter", result["adapter_path"]),
+                ("Train loss", f"{result['train_loss']:.4f}"),
+            ],
+            title=f"Phase '{phase}' complete for '{name}'.",
+        )
+    elif status == "dry_run":
+        missing = result["missing_dependencies"]
+        emit_key_value(
+            [
+                ("Model", result["model"]),
+                ("Examples", str(result.get("num_examples", result.get("num_pairs")))),
+                (
+                    "LoRA",
+                    f"r={result['lora']['r']} targets={result['lora']['target_modules']}",
+                ),
+                ("4-bit", "yes" if result["quantization"] else "no"),
+                ("Missing deps", ", ".join(missing) if missing else "none"),
+            ],
+            title=f"Dry run OK for phase '{phase}'.",
+        )
+    else:
+        emit_error(
+            f"Phase '{phase}' {status} for '{name}': {result.get('reason', '')}",
+            hint=(
+                "Install the training stack: pip install 'shaprai[training]'"
+                if status == "skipped"
+                else None
+            ),
+        )
+        sys.exit(1)
 
-    emit_success(f"Phase '{phase}' complete for '{name}'.")
+
+def _run_driftlock(
+    name: str,
+    agent_dir: Path,
+    endpoint: Optional[str],
+    endpoint_model: Optional[str],
+    turns: int,
+) -> None:
+    """Evaluate identity coherence and sycophancy against a served agent."""
+    from shaprai.inference import openai_chat_fn
+    from shaprai.training.driftlock import DriftLockEvaluator
+
+    chat_fn = openai_chat_fn(endpoint, endpoint_model or name) if endpoint else None
+    report = DriftLockEvaluator(
+        agent_dir, num_turns=turns, chat_fn=chat_fn
+    ).run_coherence_test()
+
+    if report["status"] == "not_evaluated":
+        emit_error(
+            "DriftLock not evaluated: no agent endpoint.",
+            hint=f"Serve the trained adapter and run: shaprai train {name} --phase driftlock "
+            "--endpoint http://localhost:8000/v1",
+        )
+        sys.exit(1)
+
+    flip_rate = report["sycophancy"]["flip_rate"]
+    emit_key_value(
+        [
+            ("Method", report["method"]),
+            (
+                "Drift score",
+                f"{report['drift_score']:.4f} (threshold {report['drift_threshold']})",
+            ),
+            ("Flip rate", "n/a" if flip_rate is None else f"{flip_rate:.2f}"),
+        ],
+        title=f"DriftLock report for '{name}'",
+    )
+    if report["passed"]:
+        emit_success("PASSED -- Identity coherence maintained.")
+    else:
+        emit_error(
+            "FAILED -- Drift or sycophancy detected.",
+            hint=f"Re-train with: shaprai train {name} --phase dpo",
+        )
+        sys.exit(1)
 
 
 # --------------------------------------------------------------------------- #

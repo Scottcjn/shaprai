@@ -2,7 +2,9 @@
 # Copyright (c) 2026 Elyan Labs — https://github.com/Scottcjn/shaprai
 """Unit tests for DriftLock drift detection module."""
 
+import sys
 import time
+import types
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
@@ -11,12 +13,31 @@ import pytest
 
 from shaprai.core.driftlock import (
     DEFAULT_DRIFT_THRESHOLD,
+    DEFAULT_EMBEDDING_MODEL,
     DEFAULT_WINDOW_SIZE,
     DriftLock,
     DriftLockConfig,
     DriftLockResult,
     create_driftlock_from_template,
 )
+
+ANCHOR_VECTOR = [1.0, 0.0, 0.0]
+
+
+def fake_embedder(anchors, response_vector):
+    """Embed anchor phrases as ANCHOR_VECTOR and everything else via response_vector(text)."""
+
+    def embed(texts):
+        return np.array(
+            [ANCHOR_VECTOR if t in anchors else response_vector(t) for t in texts]
+        )
+
+    return embed
+
+
+def at_cosine(c):
+    """Unit vector whose cosine similarity with ANCHOR_VECTOR is c."""
+    return [c, float(np.sqrt(1.0 - c * c)), 0.0]
 
 
 class TestDriftLockConfig:
@@ -26,11 +47,16 @@ class TestDriftLockConfig:
         """Test default configuration values."""
         config = DriftLockConfig()
 
-        assert config.embedding_model == "sentence-transformers/all-MiniLM-L6-v2"
+        assert config.embedding_model == DEFAULT_EMBEDDING_MODEL
+        assert (
+            DEFAULT_EMBEDDING_MODEL == "ibm-granite/granite-embedding-small-english-r2"
+        )
         assert config.window_size == DEFAULT_WINDOW_SIZE
         assert config.drift_threshold == DEFAULT_DRIFT_THRESHOLD
         assert config.anchor_phrases == []
         assert config.alert_callback is None
+        assert config.embedder is None
+        assert config.baseline_turns == 0
 
     def test_custom_config(self):
         """Test custom configuration."""
@@ -187,18 +213,15 @@ class TestDriftLockResponseWindow:
 
 
 class TestDriftLockDriftMeasurement:
-    """Tests for drift measurement (mocked embeddings)."""
+    """Tests for drift measurement (injected embeddings)."""
 
-    @patch("sentence_transformers.SentenceTransformer")
-    def test_measure_drift_no_responses(self, mock_model_class):
+    def test_measure_drift_no_responses(self):
         """Test drift measurement with no responses."""
-        mock_model = MagicMock()
-        mock_model_class.return_value = mock_model
-
         driftlock = DriftLock(
             DriftLockConfig(
                 anchor_phrases=["anchor1"],
                 window_size=10,
+                embedder=fake_embedder(["anchor1"], lambda t: ANCHOR_VECTOR),
             )
         )
 
@@ -208,16 +231,13 @@ class TestDriftLockDriftMeasurement:
         assert result.window_size == 0
         assert result.exceeded_threshold is False
 
-    @patch("sentence_transformers.SentenceTransformer")
-    def test_measure_drift_no_anchors(self, mock_model_class):
+    def test_measure_drift_no_anchors(self):
         """Test drift measurement with no anchors configured."""
-        mock_model = MagicMock()
-        mock_model_class.return_value = mock_model
-
         driftlock = DriftLock(
             DriftLockConfig(
                 anchor_phrases=[],
                 window_size=10,
+                embedder=fake_embedder([], lambda t: ANCHOR_VECTOR),
             )
         )
         driftlock.add_response("test response")
@@ -225,29 +245,15 @@ class TestDriftLockDriftMeasurement:
         with pytest.raises(ValueError, match="No anchor phrases configured"):
             driftlock.measure_drift()
 
-    @patch("sentence_transformers.SentenceTransformer")
-    def test_measure_drift_single_response(self, mock_model_class):
+    def test_measure_drift_single_response(self):
         """Test drift measurement with single response."""
-        mock_model = MagicMock()
-
-        # Mock embedding: return same vector for all inputs (perfect similarity)
-        # For anchor phrases, return 2D array; for single response, return 1D
-        def encode_side_effect(texts, convert_to_numpy=None):
-            if isinstance(texts, list):
-                # Multiple texts (anchor phrases) - return 2D array
-                return np.array([[1.0, 0.0, 0.0]] * len(texts))
-            else:
-                # Single text (response) - return 1D array
-                return np.array([1.0, 0.0, 0.0])
-
-        mock_model.encode.side_effect = encode_side_effect
-        mock_model_class.return_value = mock_model
-
         driftlock = DriftLock(
             DriftLockConfig(
                 anchor_phrases=["anchor1"],
                 window_size=10,
                 drift_threshold=0.5,
+                # Same vector as the anchor: perfect similarity
+                embedder=fake_embedder(["anchor1"], lambda t: ANCHOR_VECTOR),
             )
         )
 
@@ -256,26 +262,12 @@ class TestDriftLockDriftMeasurement:
 
         # With perfect similarity (1.0), drift should be 0.0
         assert result.drift_score == 0.0
+        assert result.similarity == pytest.approx(1.0)
         assert result.window_size == 1
         assert "anchor1" in result.similarity_scores
 
-    @patch("sentence_transformers.SentenceTransformer")
-    def test_measure_drift_exceeds_threshold(self, mock_model_class):
+    def test_measure_drift_exceeds_threshold(self):
         """Test drift alert when threshold exceeded."""
-        mock_model = MagicMock()
-
-        # Mock embeddings with low similarity (orthogonal vectors)
-        def encode_side_effect(texts, convert_to_numpy=None):
-            if isinstance(texts, list):
-                # Multiple texts (anchor phrases) - return 2D array
-                return np.array([[1.0, 0.0, 0.0]] * len(texts))
-            else:
-                # Single text (response) - orthogonal = 0 similarity
-                return np.array([0.0, 1.0, 0.0])
-
-        mock_model.encode.side_effect = encode_side_effect
-        mock_model_class.return_value = mock_model
-
         alert_callback = MagicMock()
 
         driftlock = DriftLock(
@@ -284,6 +276,8 @@ class TestDriftLockDriftMeasurement:
                 window_size=5,
                 drift_threshold=0.3,  # Low threshold
                 alert_callback=alert_callback,
+                # Orthogonal to the anchor: 0 similarity
+                embedder=fake_embedder(["anchor phrase"], lambda t: [0.0, 1.0, 0.0]),
             )
         )
 
@@ -291,28 +285,17 @@ class TestDriftLockDriftMeasurement:
         result = driftlock.measure_drift()
 
         # With 0 similarity, drift should be 1.0
-        assert result.drift_score > 0.5  # Should exceed threshold
+        assert result.drift_score == pytest.approx(1.0)
         assert result.exceeded_threshold is True
         alert_callback.assert_called_once()
 
-    @patch("sentence_transformers.SentenceTransformer")
-    def test_measure_drift_history_tracking(self, mock_model_class):
+    def test_measure_drift_history_tracking(self):
         """Test that drift history is tracked."""
-        mock_model = MagicMock()
-
-        def encode_side_effect(texts, convert_to_numpy=None):
-            if isinstance(texts, list):
-                return np.array([[1.0, 0.0, 0.0]] * len(texts))
-            else:
-                return np.array([1.0, 0.0, 0.0])
-
-        mock_model.encode.side_effect = encode_side_effect
-        mock_model_class.return_value = mock_model
-
         driftlock = DriftLock(
             DriftLockConfig(
                 anchor_phrases=["anchor1"],
                 window_size=10,
+                embedder=fake_embedder(["anchor1"], lambda t: ANCHOR_VECTOR),
             )
         )
 
@@ -324,6 +307,146 @@ class TestDriftLockDriftMeasurement:
 
         history = driftlock.get_drift_history()
         assert len(history) == 2
+
+    def test_window_embeddings_are_cached(self):
+        """Each response is embedded once, not on every measurement."""
+        embedded = []
+        base = fake_embedder(["anchor1"], lambda t: ANCHOR_VECTOR)
+
+        def counting_embedder(texts):
+            embedded.extend(texts)
+            return base(texts)
+
+        driftlock = DriftLock(
+            DriftLockConfig(
+                anchor_phrases=["anchor1"], window_size=2, embedder=counting_embedder
+            )
+        )
+        for i in range(4):
+            driftlock.add_response(f"r{i}")
+            driftlock.measure_drift()
+
+        assert embedded.count("anchor1") == 1
+        assert [t for t in embedded if t != "anchor1"] == ["r0", "r1", "r2", "r3"]
+        assert driftlock.response_window == ["r2", "r3"]
+
+    def test_sentence_transformers_backend(self, monkeypatch):
+        """Without an injected embedder, the configured model is loaded lazily."""
+        loaded = []
+
+        class FakeSentenceTransformer:
+            def __init__(self, name):
+                loaded.append(name)
+
+            def encode(self, texts, convert_to_numpy=True):
+                assert isinstance(texts, list)
+                return np.array([ANCHOR_VECTOR for _ in texts])
+
+        monkeypatch.setitem(
+            sys.modules,
+            "sentence_transformers",
+            types.SimpleNamespace(SentenceTransformer=FakeSentenceTransformer),
+        )
+        driftlock = DriftLock(DriftLockConfig(anchor_phrases=["anchor1"]))
+        driftlock.add_response("hello")
+
+        assert driftlock.measure_drift().drift_score == 0.0
+        assert loaded == [DEFAULT_EMBEDDING_MODEL]
+
+
+class TestDriftLockCalibration:
+    """Tests for baseline-relative drift."""
+
+    def _driftlock(self, vectors, **overrides):
+        config = dict(
+            anchor_phrases=["anchor1"],
+            window_size=10,
+            drift_threshold=0.4,
+            embedder=fake_embedder(["anchor1"], lambda t: vectors[t]),
+        )
+        config.update(overrides)
+        return DriftLock(DriftLockConfig(**config))
+
+    def test_uncalibrated_drift_penalizes_typical_similarity(self):
+        """An in-character reply at cosine 0.5 reads as 0.5 drift uncalibrated."""
+        driftlock = self._driftlock({"in character": at_cosine(0.5)})
+        driftlock.add_response("in character")
+        result = driftlock.measure_drift()
+
+        assert result.drift_score == pytest.approx(0.5)
+        assert result.baseline_similarity is None
+        assert result.exceeded_threshold is True
+
+    def test_calibrated_drift_is_relative_to_baseline(self):
+        vectors = {
+            "reference": at_cosine(0.5),
+            "in character": at_cosine(0.5),
+            "drifting": at_cosine(0.25),
+        }
+        driftlock = self._driftlock(vectors)
+
+        assert driftlock.calibrate(["reference"]) == pytest.approx(0.5)
+
+        driftlock.add_response("in character")
+        result = driftlock.measure_drift()
+        assert result.drift_score == pytest.approx(0.0)
+        assert result.baseline_similarity == pytest.approx(0.5)
+        assert result.exceeded_threshold is False
+
+        driftlock.clear_window()
+        driftlock.add_response("drifting")
+        result = driftlock.measure_drift()
+        # Lost half of the baseline identity signal
+        assert result.drift_score == pytest.approx(0.5)
+        assert result.exceeded_threshold is True
+
+    def test_calibration_never_reports_negative_drift(self):
+        vectors = {"reference": at_cosine(0.5), "strong": at_cosine(0.9)}
+        driftlock = self._driftlock(vectors)
+        driftlock.calibrate(["reference"])
+        driftlock.add_response("strong")
+
+        assert driftlock.measure_drift().drift_score == 0.0
+
+    def test_calibrate_requires_references_and_anchors(self):
+        with pytest.raises(ValueError, match="reference"):
+            self._driftlock({}).calibrate([])
+        with pytest.raises(ValueError, match="No anchor phrases"):
+            self._driftlock({"r": ANCHOR_VECTOR}, anchor_phrases=[]).calibrate(["r"])
+
+    def test_baseline_turns_auto_calibrates(self):
+        vectors = {
+            "t1": at_cosine(0.6),
+            "t2": at_cosine(0.4),
+            "t3": at_cosine(0.25),
+        }
+        driftlock = self._driftlock(vectors, baseline_turns=2, window_size=1)
+
+        driftlock.add_response("t1")
+        assert driftlock.is_calibrating
+        assert driftlock.measure_drift().drift_score == 0.0
+
+        driftlock.add_response("t2")
+        assert not driftlock.is_calibrating
+        assert driftlock.baseline_similarity == pytest.approx(0.5)
+
+        driftlock.add_response("t3")
+        assert driftlock.measure_drift().drift_score == pytest.approx(0.5)
+
+    def test_changing_anchors_discards_baseline(self):
+        driftlock = self._driftlock({"reference": at_cosine(0.5)})
+        driftlock.calibrate(["reference"])
+        driftlock.set_anchor_phrases(["new anchor"])
+
+        assert driftlock.baseline_similarity is None
+        assert driftlock.anchor_embeddings is None
+
+    def test_reset_discards_baseline(self):
+        driftlock = self._driftlock({"reference": at_cosine(0.5)})
+        driftlock.calibrate(["reference"])
+        driftlock.reset()
+
+        assert driftlock.baseline_similarity is None
 
 
 class TestDriftLockResult:
@@ -381,25 +504,14 @@ class TestCreateDriftlockFromTemplate:
 class TestDriftLockEdgeCases:
     """Tests for edge cases and error handling."""
 
-    @patch("sentence_transformers.SentenceTransformer")
-    def test_measure_drift_zero_normalization(self, mock_model_class):
+    def test_measure_drift_zero_normalization(self):
         """Test handling of zero norm in embedding normalization."""
-        mock_model = MagicMock()
-
-        def encode_side_effect(texts, convert_to_numpy=None):
-            if isinstance(texts, list):
-                return np.array([[1.0, 0.0, 0.0]] * len(texts))
-            else:
-                # Return zero vector (edge case)
-                return np.array([0.0, 0.0, 0.0])
-
-        mock_model.encode.side_effect = encode_side_effect
-        mock_model_class.return_value = mock_model
-
         driftlock = DriftLock(
             DriftLockConfig(
                 anchor_phrases=["anchor1"],
                 window_size=10,
+                # Zero vector (edge case)
+                embedder=fake_embedder(["anchor1"], lambda t: [0.0, 0.0, 0.0]),
             )
         )
 
@@ -408,6 +520,7 @@ class TestDriftLockEdgeCases:
         result = driftlock.measure_drift()
 
         assert result is not None
+        assert result.drift_score == pytest.approx(1.0)
 
     def test_drift_score_bounds(self):
         """Test that drift score is bounded between 0 and 1."""
@@ -426,31 +539,15 @@ class TestDriftLockEdgeCases:
 class TestDriftLockIntegration:
     """Integration-style tests (still mocked)."""
 
-    @patch("sentence_transformers.SentenceTransformer")
-    def test_full_conversation_simulation(self, mock_model_class):
+    def test_full_conversation_simulation(self):
         """Simulate a full conversation with drift detection."""
-        mock_model = MagicMock()
-
-        # Simulate embeddings that gradually drift
+        # Responses gradually rotate away from the anchor direction
         drift_amount = 0.0
 
-        def encode_side_effect(texts, convert_to_numpy=None):
+        def response_vector(text):
             nonlocal drift_amount
-            if isinstance(texts, list):
-                # Anchor phrases - return stable embedding
-                return np.array([[1.0, 0.0, 0.0]] * len(texts))
-            else:
-                # Response - gradually drift
-                drift_amount += 0.1
-                drift_vector = np.array([max(0, 1.0 - drift_amount), drift_amount, 0.0])
-                # Normalize
-                norm = np.linalg.norm(drift_vector)
-                if norm > 0:
-                    drift_vector = drift_vector / norm
-                return drift_vector
-
-        mock_model.encode.side_effect = encode_side_effect
-        mock_model_class.return_value = mock_model
+            drift_amount += 0.1
+            return [max(0, 1.0 - drift_amount), drift_amount, 0.0]
 
         alert_callback = MagicMock()
 
@@ -460,21 +557,20 @@ class TestDriftLockIntegration:
                 window_size=5,
                 drift_threshold=0.4,
                 alert_callback=alert_callback,
+                embedder=fake_embedder(["identity anchor"], response_vector),
             )
         )
 
         # Simulate 10-turn conversation
+        scores = []
         for i in range(10):
             driftlock.add_response(f"Response {i}")
-            result = driftlock.measure_drift()
+            scores.append(driftlock.measure_drift().drift_score)
 
-            # Drift should increase over time
-            if i > 3:  # After a few turns, drift should be noticeable
-                assert result.drift_score >= 0
-
-        # Verify alerts were triggered if drift exceeded threshold
-        # (depends on exact mock behavior)
-        assert driftlock.get_drift_history() is not None
+        # Drift should increase over time and eventually alert
+        assert scores == sorted(scores)
+        assert scores[-1] > 0.4
+        assert alert_callback.called
         assert len(driftlock.get_drift_history()) == 10
 
 

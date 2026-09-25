@@ -40,7 +40,7 @@ dependencies = [
 [project.optional-dependencies]
 training = [
     "torch>=2.4",
-    "transformers>=4.56.2",
+    "transformers>=5.0",
     "peft>=0.17.0",
     "trl>=1.0,<2",
     "datasets>=3.0",
