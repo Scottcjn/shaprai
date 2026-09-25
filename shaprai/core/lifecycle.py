@@ -67,6 +67,8 @@ def create_agent(
         "name": name,
         "state": AgentState.CREATED.value,
         "template": template.name,
+        "description": template.description,
+        "version": template.version,
         "model": template.model,
         "personality": template.personality,
         "capabilities": template.capabilities,

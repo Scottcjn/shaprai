@@ -1,24 +1,31 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Elyan Labs — https://github.com/Scottcjn/shaprai
-"""Raw MCP (Model Context Protocol) runtime for Elyan-class agents.
+"""Model Context Protocol (MCP) runtime for Elyan-class agents.
 
-Provides a native MCP agent implementation with Beacon and Grazer
-registered as default tools. This is the most lightweight runtime
-option -- no framework overhead, just direct tool registration and
-message handling.
+Two layers:
+
+- ``MCPAgent`` is a framework-free tool registry and conversation context
+  with Beacon and Grazer registered as default tools. It emits tool
+  definitions in MCP form (``inputSchema`` plus behavior ``annotations``) or
+  as OpenAI-style function tools for chat-completion APIs.
+- ``MCPAgent.to_mcp_server()`` / ``serve()`` expose those tools, and the
+  agent's SophiaCore persona as an MCP prompt, through the official MCP
+  Python SDK (``pip install 'shaprai[mcp]'``) over stdio or streamable HTTP.
+  The SDK handles protocol version negotiation.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import time
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from dataclasses import asdict, dataclass, field
+from typing import Any, Callable, Dict, List, Literal, Optional
 
 from shaprai.sanctuary.principles import get_ethics_prompt
 
 logger = logging.getLogger(__name__)
+
+EngageAction = Literal["comment", "review", "claim", "upvote", "reply"]
 
 
 @dataclass
@@ -28,14 +35,21 @@ class MCPTool:
     Attributes:
         name: Tool identifier.
         description: Human-readable description.
-        parameters: JSON Schema for tool parameters.
-        handler: Callable that executes the tool.
+        parameters: JSON Schema for tool parameters (MCP ``inputSchema``).
+        handler: Callable that executes the tool. When served over MCP, the
+            SDK validates arguments against the handler's type hints, so
+            annotate handlers precisely.
+        title: Optional human-readable display name.
+        annotations: MCP tool behavior hints: ``readOnlyHint``,
+            ``destructiveHint``, ``idempotentHint``, ``openWorldHint``.
     """
 
     name: str
     description: str
     parameters: Dict[str, Any]
     handler: Callable[..., Any]
+    title: Optional[str] = None
+    annotations: Dict[str, bool] = field(default_factory=dict)
 
 
 @dataclass
@@ -100,11 +114,28 @@ class MCPAgent:
         # Register default tools
         self._register_default_tools()
 
+    @classmethod
+    def from_manifest(cls, manifest: Dict[str, Any]) -> "MCPAgent":
+        """Create an MCPAgent whose system prompt matches the one it was trained with.
+
+        Args:
+            manifest: Agent manifest dictionary.
+
+        Returns:
+            Configured MCPAgent instance.
+        """
+        from shaprai.training.recipes import build_system_prompt
+
+        agent = cls(name=manifest.get("name", "unnamed"))
+        agent.system_prompt = build_system_prompt(manifest)
+        return agent
+
     def _register_default_tools(self) -> None:
         """Register Beacon and Grazer as default tools."""
         self.register_tool(
             MCPTool(
                 name="beacon_heartbeat",
+                title="Beacon heartbeat",
                 description="Send a heartbeat to the Beacon discovery service to confirm agent is alive.",
                 parameters={
                     "type": "object",
@@ -116,12 +147,19 @@ class MCPAgent:
                     },
                 },
                 handler=self._beacon_heartbeat,
+                annotations={
+                    "readOnlyHint": False,
+                    "destructiveHint": False,
+                    "idempotentHint": True,
+                    "openWorldHint": True,
+                },
             )
         )
 
         self.register_tool(
             MCPTool(
                 name="grazer_discover",
+                title="Discover content",
                 description="Discover relevant content across platforms using Grazer.",
                 parameters={
                     "type": "object",
@@ -140,12 +178,14 @@ class MCPAgent:
                     "required": ["platforms"],
                 },
                 handler=self._grazer_discover,
+                annotations={"readOnlyHint": True, "openWorldHint": True},
             )
         )
 
         self.register_tool(
             MCPTool(
                 name="grazer_engage",
+                title="Engage with content",
                 description="Engage with discovered content (comment, review, claim).",
                 parameters={
                     "type": "object",
@@ -166,6 +206,12 @@ class MCPAgent:
                     "required": ["target_url", "action"],
                 },
                 handler=self._grazer_engage,
+                annotations={
+                    "readOnlyHint": False,
+                    "destructiveHint": False,
+                    "idempotentHint": False,
+                    "openWorldHint": True,
+                },
             )
         )
 
@@ -178,20 +224,47 @@ class MCPAgent:
         self.tools[tool.name] = tool
         logger.info("Registered tool: %s", tool.name)
 
-    def get_tools_schema(self) -> List[Dict[str, Any]]:
+    def get_tools_schema(self, format: str = "mcp") -> List[Dict[str, Any]]:
         """Get JSON Schema descriptions of all registered tools.
+
+        Args:
+            format: ``"mcp"`` for MCP tool definitions (``inputSchema``,
+                ``title``, ``annotations``), or ``"openai"`` for
+                OpenAI-compatible chat-completion ``tools`` entries.
 
         Returns:
             List of tool schema dictionaries.
         """
-        return [
-            {
+        if format == "openai":
+            return [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters,
+                    },
+                }
+                for tool in self.tools.values()
+            ]
+        if format != "mcp":
+            raise ValueError(
+                f"Unknown tool schema format '{format}' (use 'mcp' or 'openai')"
+            )
+
+        schemas = []
+        for tool in self.tools.values():
+            schema: Dict[str, Any] = {
                 "name": tool.name,
                 "description": tool.description,
-                "parameters": tool.parameters,
+                "inputSchema": tool.parameters,
             }
-            for tool in self.tools.values()
-        ]
+            if tool.title:
+                schema["title"] = tool.title
+            if tool.annotations:
+                schema["annotations"] = dict(tool.annotations)
+            schemas.append(schema)
+        return schemas
 
     def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
         """Execute a registered tool.
@@ -243,6 +316,65 @@ class MCPAgent:
         return messages
 
     # ------------------------------------------------------------------- #
+    #  MCP server
+    # ------------------------------------------------------------------- #
+
+    def to_mcp_server(self) -> Any:
+        """Build an MCP server exposing this agent's tools and persona prompt.
+
+        Returns:
+            ``mcp.server.mcpserver.MCPServer`` instance.
+
+        Raises:
+            ImportError: If the MCP SDK (``mcp>=2``) is not installed.
+        """
+        try:
+            from mcp.server.mcpserver import MCPServer
+            from mcp_types import ToolAnnotations
+        except ImportError:
+            raise ImportError(
+                "MCP SDK not installed. Install with: pip install 'shaprai[mcp]'"
+            )
+
+        server = MCPServer(
+            name=f"shaprai-{self.name}",
+            instructions=(
+                f"Tools of the Elyan-class agent '{self.name}'. Fetch the "
+                "'persona' prompt for the principles and voice it operates under."
+            ),
+        )
+        for tool in self.tools.values():
+            server.add_tool(
+                tool.handler,
+                name=tool.name,
+                title=tool.title,
+                description=tool.description,
+                annotations=(
+                    ToolAnnotations(**tool.annotations) if tool.annotations else None
+                ),
+            )
+
+        system_prompt = self.system_prompt
+
+        @server.prompt(
+            name="persona",
+            description=f"SophiaCore principles and persona of '{self.name}'.",
+        )
+        def persona() -> str:
+            return system_prompt
+
+        return server
+
+    def serve(self, transport: str = "stdio", **kwargs: Any) -> None:
+        """Run this agent as an MCP server (blocks).
+
+        Args:
+            transport: ``"stdio"`` or ``"streamable-http"``.
+            **kwargs: Transport options, e.g. ``host``/``port`` for HTTP.
+        """
+        self.to_mcp_server().run(transport, **kwargs)
+
+    # ------------------------------------------------------------------- #
     #  Default tool handlers
     # ------------------------------------------------------------------- #
 
@@ -265,22 +397,48 @@ class MCPAgent:
     ) -> List[Dict[str, Any]]:
         """Grazer discovery tool handler."""
         try:
-            from shaprai.integrations.grazer import discover_content
+            from shaprai.integrations.grazer.discovery import (
+                DiscoveryConfig,
+                GrazerDiscovery,
+            )
 
-            return discover_content(self.name, platforms, topics)
+            discovery = GrazerDiscovery(
+                DiscoveryConfig(platforms=platforms, topics=topics or [])
+            )
+            return [asdict(post) for post in discovery.discover(self.name)]
         except Exception as e:
             return [{"status": "error", "reason": str(e)}]
 
     def _grazer_engage(
         self,
         target_url: str,
-        action: str,
+        action: EngageAction,
         content: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Grazer engagement tool handler."""
         try:
-            from shaprai.integrations.grazer import engage
+            from shaprai.integrations.grazer.discovery import DiscoveredPost
+            from shaprai.integrations.grazer.responder import (
+                GeneratedResponse,
+                GrazerResponder,
+                ResponderConfig,
+            )
 
-            return engage(self.name, target_url, action, content)
+            post = DiscoveredPost(
+                post_id=target_url,
+                platform="",
+                title="",
+                content="",
+                author="",
+                url=target_url,
+                topics=[],
+                relevance_score=0.0,
+            )
+            response = GeneratedResponse(
+                post=post, response_text=content or "", quality_score=0.0, action=action
+            )
+            return GrazerResponder(ResponderConfig()).submit_response(
+                response, self.name
+            )
         except Exception as e:
             return {"status": "error", "reason": str(e)}

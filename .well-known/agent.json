@@ -1,7 +1,7 @@
 {
   "name": "ShaprAI",
   "description": "Agent personality shaping and lifecycle framework by Elyan Labs. Sharpen raw models into principled, self-governing Elyan-class agents.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "protocols": ["mcp", "a2a", "http"],
   "capabilities": [
     "template_engine",

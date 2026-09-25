@@ -91,7 +91,9 @@ class ShaprCrewAgent:
             return self._crew_agent
 
         except ImportError:
-            raise ImportError("crewai not installed. Install with: pip install crewai")
+            raise ImportError(
+                "crewai not installed. Install with: pip install 'shaprai[crewai]'"
+            )
 
     @classmethod
     def from_manifest(cls, manifest: Dict[str, Any]) -> "ShaprCrewAgent":
@@ -120,6 +122,7 @@ def create_crew(
     tasks: List[Dict[str, Any]],
     process: str = "sequential",
     verbose: bool = False,
+    manager_llm: Optional[str] = None,
 ) -> Any:
     """Create a CrewAI Crew with ShaprAI-wrapped agents.
 
@@ -128,6 +131,8 @@ def create_crew(
         tasks: List of task dictionaries with 'description' and 'agent' keys.
         process: Execution process ('sequential' or 'hierarchical').
         verbose: Enable verbose output.
+        manager_llm: Model for the manager agent; CrewAI requires one (or a
+            manager agent) for the hierarchical process.
 
     Returns:
         CrewAI Crew object ready to execute.
@@ -135,8 +140,13 @@ def create_crew(
     Raises:
         ImportError: If crewai is not installed.
     """
+    if process not in ("sequential", "hierarchical"):
+        raise ValueError(
+            f"process must be 'sequential' or 'hierarchical', not '{process}'"
+        )
+
     try:
-        from crewai import Crew, Task
+        from crewai import Crew, Process, Task
 
         crew_agents = [a.to_crewai_agent() for a in agents]
 
@@ -159,6 +169,8 @@ def create_crew(
         crew = Crew(
             agents=crew_agents,
             tasks=crew_tasks,
+            process=Process(process),
+            manager_llm=manager_llm,
             verbose=verbose,
         )
 
@@ -166,4 +178,6 @@ def create_crew(
         return crew
 
     except ImportError:
-        raise ImportError("crewai not installed. Install with: pip install crewai")
+        raise ImportError(
+            "crewai not installed. Install with: pip install 'shaprai[crewai]'"
+        )

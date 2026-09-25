@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import json
 import sys
 from pathlib import Path
 from typing import Optional
@@ -77,7 +79,12 @@ def main(
     set_output_format(ctx, OutputFormat(output_format))
     _ensure_dirs()
     if not skip_checks:
-        require_elyan_ecosystem()
+        # Keep stdout clean where it carries protocol or JSON output
+        if output_format == "json" or ctx.invoked_subcommand in ("mcp", "agent-card"):
+            with contextlib.redirect_stdout(sys.stderr):
+                require_elyan_ecosystem()
+        else:
+            require_elyan_ecosystem()
 
 
 # --------------------------------------------------------------------------- #
@@ -503,6 +510,86 @@ def sanctuary(name: str, lesson: Optional[str]) -> None:
             ("Graduation ready", "Yes" if report["graduation_ready"] else "No"),
         ]
     )
+
+
+# --------------------------------------------------------------------------- #
+#  shaprai mcp / agent-card
+# --------------------------------------------------------------------------- #
+
+
+@main.command()
+@click.argument("name")
+@click.option(
+    "--transport",
+    type=click.Choice(["stdio", "streamable-http"]),
+    default="stdio",
+    help="MCP transport: 'stdio' (default, for local clients) or 'streamable-http'.",
+)
+@click.option("--host", default="127.0.0.1", help="streamable-http: bind address.")
+@click.option(
+    "--port", default=8000, type=int, help="streamable-http: port (default: 8000)."
+)
+def mcp(name: str, transport: str, host: str, port: int) -> None:
+    """Serve an agent's tools and persona prompt over the Model Context Protocol.
+
+    Needs the MCP SDK: pip install 'shaprai[mcp]'.
+    """
+    from shaprai.runtimes.mcp_native import MCPAgent
+
+    if not (AGENTS_DIR / name).exists():
+        emit_error(f"Agent '{name}' not found.", hint="Run 'shaprai fleet status'.")
+        sys.exit(1)
+
+    agent = MCPAgent.from_manifest(get_agent_status(name, agents_dir=AGENTS_DIR))
+    try:
+        server = agent.to_mcp_server()
+    except ImportError as e:
+        emit_error(str(e))
+        sys.exit(1)
+
+    if transport == "stdio":
+        server.run("stdio")
+    else:
+        server.run("streamable-http", host=host, port=port)
+
+
+@main.command("agent-card")
+@click.argument("name")
+@click.option(
+    "--url", required=True, help="Endpoint where the agent serves A2A requests."
+)
+@click.option(
+    "--binding",
+    type=click.Choice(["JSONRPC", "HTTP+JSON", "GRPC"]),
+    default="JSONRPC",
+    help="A2A protocol binding of the endpoint (default: JSONRPC).",
+)
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    help="Write the card to this file instead of stdout.",
+)
+def agent_card(name: str, url: str, binding: str, output: Optional[str]) -> None:
+    """Print an agent's A2A 1.0 Agent Card.
+
+    Serve it at /.well-known/agent-card.json on the agent's domain.
+    """
+    from shaprai.a2a import build_agent_card
+
+    if not (AGENTS_DIR / name).exists():
+        emit_error(f"Agent '{name}' not found.", hint="Run 'shaprai fleet status'.")
+        sys.exit(1)
+
+    card = build_agent_card(
+        get_agent_status(name, agents_dir=AGENTS_DIR), url, protocol_binding=binding
+    )
+    text = json.dumps(card, indent=2)
+    if output:
+        Path(output).write_text(text + "\n")
+        emit_success(f"Agent Card written to {output}")
+    else:
+        click.echo(text)
 
 
 # --------------------------------------------------------------------------- #
