@@ -67,6 +67,22 @@ class TestTrainCommand:
         assert "skipped" in result.output
         assert "shaprai[training]" in result.output
 
+    def test_malformed_data_is_a_clean_error(self, agents_dir, tmp_path):
+        bad = tmp_path / "bad.jsonl"
+        bad.write_text('{"text": "not conversational"}\n')
+        for phase in ("sft", "dpo"):
+            result = run(
+                "train", "sable", "--phase", phase, "--data", str(bad), "--dry-run"
+            )
+            assert result.exit_code == 1
+            assert "record 1" in result.output
+            assert "Traceback" not in result.output
+
+    def test_mcp_engage_requires_graduated_agent(self, agents_dir):
+        result = run("mcp", "sable", "--allow-engage")
+        assert result.exit_code == 1
+        assert "GRADUATED or DEPLOYED" in result.output
+
     def test_driftlock_without_endpoint_is_not_a_pass(self, agents_dir):
         result = run("train", "sable", "--phase", "driftlock")
         assert result.exit_code == 1
@@ -103,8 +119,7 @@ class TestTrainCommand:
 class TestOpenAIChatFn:
     @responses.activate
     def test_request_shape_and_auth(self, monkeypatch):
-        monkeypatch.delenv("SHAPRAI_API_KEY", raising=False)
-        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        monkeypatch.setenv("SHAPRAI_API_KEY", "sk-test")
         responses.add(
             responses.POST,
             f"{ENDPOINT}/chat/completions",
@@ -124,6 +139,29 @@ class TestOpenAIChatFn:
             "temperature": 0.2,
             "max_tokens": 64,
         }
+
+    @responses.activate
+    def test_openai_key_only_goes_to_openai(self, monkeypatch):
+        monkeypatch.delenv("SHAPRAI_API_KEY", raising=False)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+        for base in (ENDPOINT, "https://api.openai.com.evil.example/v1"):
+            responses.add(
+                responses.POST,
+                f"{base}/chat/completions",
+                json={"choices": [{"message": {"content": "hi"}}]},
+            )
+            openai_chat_fn(base, "m")([])
+            assert "Authorization" not in responses.calls[-1].request.headers
+
+        responses.add(
+            responses.POST,
+            "https://api.openai.com/v1/chat/completions",
+            json={"choices": [{"message": {"content": "hi"}}]},
+        )
+        openai_chat_fn("https://api.openai.com/v1", "m")([])
+        assert (
+            responses.calls[-1].request.headers["Authorization"] == "Bearer sk-openai"
+        )
 
     @responses.activate
     def test_no_auth_header_for_local_servers(self, monkeypatch):

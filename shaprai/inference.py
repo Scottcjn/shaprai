@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import os
 from typing import Callable, Dict, List, Optional
+from urllib.parse import urlparse
 
 import requests
 
@@ -35,8 +36,9 @@ def openai_chat_fn(
     Args:
         base_url: API root, e.g. ``http://localhost:8000/v1``.
         model: Model name as the server knows it.
-        api_key: Bearer token. Defaults to ``SHAPRAI_API_KEY`` or
-            ``OPENAI_API_KEY`` from the environment; local servers need none.
+        api_key: Bearer token. Defaults to ``SHAPRAI_API_KEY`` from the
+            environment; ``OPENAI_API_KEY`` is used only for api.openai.com.
+            Local servers need none.
         temperature: Sampling temperature.
         max_tokens: Maximum tokens per reply.
         timeout: Per-request timeout in seconds.
@@ -45,9 +47,10 @@ def openai_chat_fn(
         Callable mapping a message list to the assistant reply text.
     """
     url = base_url.rstrip("/") + "/chat/completions"
-    key = (
-        api_key or os.environ.get("SHAPRAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
-    )
+    key = api_key or os.environ.get("SHAPRAI_API_KEY")
+    if not key and urlparse(url).hostname == "api.openai.com":
+        # Never send an OpenAI key to any other (possibly mistyped) host
+        key = os.environ.get("OPENAI_API_KEY")
     headers = {"Content-Type": "application/json"}
     if key:
         headers["Authorization"] = f"Bearer {key}"

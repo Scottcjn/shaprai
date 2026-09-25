@@ -26,6 +26,9 @@ from shaprai.sanctuary.principles import get_ethics_prompt
 logger = logging.getLogger(__name__)
 
 EngageAction = Literal["comment", "review", "claim", "upvote", "reply"]
+TEXT_ACTIONS = ("comment", "review", "reply")
+# Same bar as GeneratedResponse.is_quality
+ENGAGE_MIN_QUALITY = 0.8
 
 
 @dataclass
@@ -42,6 +45,9 @@ class MCPTool:
         title: Optional human-readable display name.
         annotations: MCP tool behavior hints: ``readOnlyHint``,
             ``destructiveHint``, ``idempotentHint``, ``openWorldHint``.
+        publishes: The tool acts publicly as the agent (posts, reviews,
+            claims). Such tools are left out of the MCP server unless
+            ``to_mcp_server(allow_publishing=True)``.
     """
 
     name: str
@@ -50,6 +56,7 @@ class MCPTool:
     handler: Callable[..., Any]
     title: Optional[str] = None
     annotations: Dict[str, bool] = field(default_factory=dict)
+    publishes: bool = False
 
 
 @dataclass
@@ -212,6 +219,7 @@ class MCPAgent:
                     "idempotentHint": False,
                     "openWorldHint": True,
                 },
+                publishes=True,
             )
         )
 
@@ -319,8 +327,13 @@ class MCPAgent:
     #  MCP server
     # ------------------------------------------------------------------- #
 
-    def to_mcp_server(self) -> Any:
+    def to_mcp_server(self, allow_publishing: bool = False) -> Any:
         """Build an MCP server exposing this agent's tools and persona prompt.
+
+        Args:
+            allow_publishing: Also expose tools that act publicly as the agent
+                (``grazer_engage``). Off by default: any connected MCP client
+                could otherwise post as the agent.
 
         Returns:
             ``mcp.server.mcpserver.MCPServer`` instance.
@@ -344,6 +357,8 @@ class MCPAgent:
             ),
         )
         for tool in self.tools.values():
+            if tool.publishes and not allow_publishing:
+                continue
             server.add_tool(
                 tool.handler,
                 name=tool.name,
@@ -365,14 +380,17 @@ class MCPAgent:
 
         return server
 
-    def serve(self, transport: str = "stdio", **kwargs: Any) -> None:
+    def serve(
+        self, transport: str = "stdio", allow_publishing: bool = False, **kwargs: Any
+    ) -> None:
         """Run this agent as an MCP server (blocks).
 
         Args:
             transport: ``"stdio"`` or ``"streamable-http"``.
+            allow_publishing: Expose tools that act publicly as the agent.
             **kwargs: Transport options, e.g. ``host``/``port`` for HTTP.
         """
-        self.to_mcp_server().run(transport, **kwargs)
+        self.to_mcp_server(allow_publishing=allow_publishing).run(transport, **kwargs)
 
     # ------------------------------------------------------------------- #
     #  Default tool handlers
@@ -415,7 +433,11 @@ class MCPAgent:
         action: EngageAction,
         content: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Grazer engagement tool handler."""
+        """Grazer engagement tool handler.
+
+        Text engagements (comment, review, reply) must pass the Grazer
+        responder's quality gate before anything is posted.
+        """
         try:
             from shaprai.integrations.grazer.discovery import DiscoveredPost
             from shaprai.integrations.grazer.responder import (
@@ -434,11 +456,27 @@ class MCPAgent:
                 topics=[],
                 relevance_score=0.0,
             )
+            responder = GrazerResponder(ResponderConfig())
+            text = (content or "").strip()
+            quality = 1.0  # upvote/claim carry no text to judge
+            if action in TEXT_ACTIONS:
+                if not text:
+                    return {
+                        "status": "rejected",
+                        "reason": f"'{action}' requires content",
+                    }
+                quality = responder._score_response(text, post)
+                if quality < ENGAGE_MIN_QUALITY:
+                    return {
+                        "status": "rejected",
+                        "reason": f"content failed the quality gate ({quality:.2f} < "
+                        f"{ENGAGE_MIN_QUALITY}); write a specific reply of at least "
+                        f"{responder.config.min_words} words",
+                        "quality_score": quality,
+                    }
             response = GeneratedResponse(
-                post=post, response_text=content or "", quality_score=0.0, action=action
+                post=post, response_text=text, quality_score=quality, action=action
             )
-            return GrazerResponder(ResponderConfig()).submit_response(
-                response, self.name
-            )
+            return responder.submit_response(response, self.name)
         except Exception as e:
             return {"status": "error", "reason": str(e)}

@@ -239,18 +239,22 @@ def train(
 
     click.echo(f"Training '{name}' -- phase: {phase}, epochs: {epochs}")
 
-    if phase == "sft":
-        from shaprai.training.sft import SFTTrainer
+    try:
+        if phase == "sft":
+            from shaprai.training.sft import SFTTrainer
 
-        result = SFTTrainer(agent_dir).train(
-            data_path=data, epochs=epochs, dry_run=dry_run
-        )
-    else:
-        from shaprai.training.dpo import DPOTrainer
+            result = SFTTrainer(agent_dir).train(
+                data_path=data, epochs=epochs, dry_run=dry_run
+            )
+        else:
+            from shaprai.training.dpo import DPOTrainer
 
-        result = DPOTrainer(agent_dir, method=phase).train(
-            pairs_path=data, epochs=epochs, dry_run=dry_run
-        )
+            result = DPOTrainer(agent_dir, method=phase).train(
+                pairs_path=data, epochs=epochs, dry_run=dry_run
+            )
+    except (FileNotFoundError, ValueError) as e:
+        emit_error(f"Cannot train '{name}': {e}")
+        sys.exit(1)
 
     status = result["status"]
     if status == "completed":
@@ -529,7 +533,13 @@ def sanctuary(name: str, lesson: Optional[str]) -> None:
 @click.option(
     "--port", default=8000, type=int, help="streamable-http: port (default: 8000)."
 )
-def mcp(name: str, transport: str, host: str, port: int) -> None:
+@click.option(
+    "--allow-engage",
+    is_flag=True,
+    help="Also expose grazer_engage, which posts publicly as the agent. "
+    "Only for GRADUATED or DEPLOYED agents.",
+)
+def mcp(name: str, transport: str, host: str, port: int, allow_engage: bool) -> None:
     """Serve an agent's tools and persona prompt over the Model Context Protocol.
 
     Needs the MCP SDK: pip install 'shaprai[mcp]'.
@@ -540,9 +550,19 @@ def mcp(name: str, transport: str, host: str, port: int) -> None:
         emit_error(f"Agent '{name}' not found.", hint="Run 'shaprai fleet status'.")
         sys.exit(1)
 
-    agent = MCPAgent.from_manifest(get_agent_status(name, agents_dir=AGENTS_DIR))
+    manifest = get_agent_status(name, agents_dir=AGENTS_DIR)
+    allowed = (AgentState.GRADUATED.value, AgentState.DEPLOYED.value)
+    if allow_engage and manifest.get("state") not in allowed:
+        emit_error(
+            f"--allow-engage needs a GRADUATED or DEPLOYED agent; '{name}' is "
+            f"{manifest.get('state')}.",
+            hint=f"Run 'shaprai graduate {name}' after the Sanctuary curriculum.",
+        )
+        sys.exit(1)
+
+    agent = MCPAgent.from_manifest(manifest)
     try:
-        server = agent.to_mcp_server()
+        server = agent.to_mcp_server(allow_publishing=allow_engage)
     except ImportError as e:
         emit_error(str(e))
         sys.exit(1)

@@ -197,7 +197,15 @@ class SFTTrainer(ManifestPhase):
         ``sft_generator`` output also carries ``text``/``weight``/``category``
         columns, which would otherwise confuse TRL's format detection.
         """
-        records = [{"messages": row["messages"]} for row in read_jsonl(dataset_path)]
+        records = []
+        for line, row in enumerate(read_jsonl(dataset_path), start=1):
+            messages = row.get("messages") if isinstance(row, dict) else None
+            if not isinstance(messages, list) or not messages:
+                raise ValueError(
+                    f"{dataset_path}, record {line}: expected a 'messages' list of "
+                    '{"role", "content"} turns (conversational SFT format)'
+                )
+            records.append({"messages": messages})
         if not records:
             raise ValueError(f"No SFT examples in {dataset_path}")
         return records

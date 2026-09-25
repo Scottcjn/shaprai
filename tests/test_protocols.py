@@ -15,6 +15,14 @@ from shaprai.core.lifecycle import create_agent
 from shaprai.core.template_engine import AgentTemplate
 from shaprai.runtimes.mcp_native import MCPAgent
 
+REVIEW = (
+    "The retry loop in fetch_pages never resets the backoff after a success, so one "
+    "transient failure slows every later request. Resetting the delay inside the "
+    "success branch fixes it. I also noticed the timeout is hard-coded to five "
+    "seconds; reading it from the existing config object would make the tests in "
+    "test_fetch.py easier to write, since they could shorten it."
+)
+
 MANIFEST = {
     "name": "sable",
     "description": "Reviews pull requests without flattery.",
@@ -88,15 +96,23 @@ class TestMCPServer:
     def _sdk(self):
         pytest.importorskip("mcp.server.mcpserver")
 
-    def _session(self, agent, body):
+    def _session(self, agent, body, allow_publishing=True):
         import anyio
         from mcp.client import Client
 
         async def main():
-            async with Client(agent.to_mcp_server()) as client:
+            server = agent.to_mcp_server(allow_publishing=allow_publishing)
+            async with Client(server) as client:
                 return await body(client)
 
         return anyio.run(main)
+
+    def test_publishing_tools_are_opt_in(self):
+        async def body(client):
+            return {t.name for t in (await client.list_tools()).tools}
+
+        default = self._session(MCPAgent("sable"), body, allow_publishing=False)
+        assert default == {"beacon_heartbeat", "grazer_discover"}
 
     def test_lists_tools_with_schemas_and_annotations(self):
         async def body(client):
@@ -134,7 +150,11 @@ class TestMCPServer:
         async def body(client):
             ok = await client.call_tool(
                 "grazer_engage",
-                {"target_url": "https://github.com/o/r/pull/1", "action": "review"},
+                {
+                    "target_url": "https://github.com/o/r/pull/1",
+                    "action": "review",
+                    "content": REVIEW,
+                },
             )
             bad = await client.call_tool(
                 "grazer_engage", {"target_url": "u", "action": "spam"}
@@ -145,7 +165,7 @@ class TestMCPServer:
 
         assert ok.is_error is False
         assert json.loads(ok.content[0].text) == {"status": "ok"}
-        assert submitted == [("https://github.com/o/r/pull/1", "review", "")]
+        assert submitted == [("https://github.com/o/r/pull/1", "review", REVIEW)]
         assert bad.is_error is True
 
     def test_persona_prompt(self):
@@ -159,6 +179,46 @@ class TestMCPServer:
         listed, fetched = self._session(agent, body)
         assert [p.name for p in listed] == ["persona"]
         assert fetched.messages[0].content.text == agent.system_prompt
+
+
+class TestEngageQualityGate:
+    URL = "https://github.com/o/r/pull/1"
+
+    @pytest.fixture
+    def submitted(self, monkeypatch):
+        from shaprai.integrations.grazer.responder import GrazerResponder
+
+        sent = []
+        monkeypatch.setattr(
+            GrazerResponder,
+            "submit_response",
+            lambda self, response, agent: sent.append(response) or {"status": "ok"},
+        )
+        return sent
+
+    def engage(self, **kwargs):
+        return MCPAgent("sable").execute_tool(
+            "grazer_engage", {"target_url": self.URL, **kwargs}
+        )
+
+    def test_text_actions_need_content(self, submitted):
+        result = self.engage(action="comment")
+        assert result["status"] == "rejected" and "requires content" in result["reason"]
+        assert submitted == []
+
+    def test_low_quality_text_is_rejected(self, submitted):
+        result = self.engage(action="reply", content="Great post!")
+        assert result["status"] == "rejected"
+        assert result["quality_score"] < 0.8
+        assert submitted == []
+
+    def test_quality_text_is_submitted(self, submitted):
+        assert self.engage(action="review", content=REVIEW) == {"status": "ok"}
+        assert submitted[0].quality_score >= 0.8
+        assert submitted[0].response_text == REVIEW
+
+    def test_upvote_needs_no_text(self, submitted):
+        assert self.engage(action="upvote") == {"status": "ok"}
 
 
 def test_mcp_server_requires_sdk(monkeypatch):
@@ -315,6 +375,17 @@ class TestSmolagentsAdapter:
         assert built["model"].model_id == "Qwen/Qwen3-8B"
         assert built["name"] == "sable"
 
+    @pytest.mark.parametrize(
+        "name, expected",
+        [("my-agent", "my_agent"), ("3po", "_3po"), ("class", "class_"), ("", "agent")],
+    )
+    def test_names_become_identifiers(self, monkeypatch, name, expected):
+        from shaprai.runtimes.smolagent_adapter import ShaprSmolagent
+
+        built = self._fake_smolagents(monkeypatch)
+        ShaprSmolagent(name).build()
+        assert built["name"] == expected
+
     def test_custom_model(self, monkeypatch):
         from shaprai.runtimes.smolagent_adapter import ShaprSmolagent
 
@@ -327,7 +398,7 @@ class TestSmolagentsAdapter:
         pytest.importorskip("smolagents")
         from shaprai.runtimes.smolagent_adapter import ShaprSmolagent
 
-        agent = ShaprSmolagent.from_manifest(MANIFEST)
+        agent = ShaprSmolagent.from_manifest({**MANIFEST, "name": "my-agent"})
         built = agent.build()
         assert built.instructions == agent.system_prompt
         assert agent.system_prompt in built.system_prompt

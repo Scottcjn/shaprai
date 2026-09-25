@@ -315,9 +315,16 @@ class DPOTrainer(ManifestPhase):
     ) -> List[Dict[str, Any]]:
         """Load pairs as conversational records with the agent's system prompt."""
         system_prompt = build_system_prompt(manifest)
-        pairs = [
-            to_conversational(row, system_prompt) for row in read_jsonl(dataset_path)
-        ]
+        pairs = []
+        for line, row in enumerate(read_jsonl(dataset_path), start=1):
+            if not isinstance(row, dict) or not all(
+                row.get(k) for k in ("prompt", "chosen", "rejected")
+            ):
+                raise ValueError(
+                    f"{dataset_path}, record {line}: expected 'prompt', 'chosen' and "
+                    "'rejected' fields"
+                )
+            pairs.append(to_conversational(row, system_prompt))
         if not pairs:
             raise ValueError(f"No preference pairs in {dataset_path}")
         return pairs

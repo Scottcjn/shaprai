@@ -52,6 +52,14 @@ pip install 'shaprai[dev]'         # pytest, black, isort, flake8, ruff
 
 Python 3.10-3.14 is supported (CrewAI itself does not support 3.14 yet).
 
+### Upgrading from 0.1
+
+- The ML stack is now optional: `pip install 'shaprai[training]'` (or `[all]`).
+- Agents created before 0.2 may name `Qwen/Qwen3-7B-Instruct` in `~/.shaprai/agents/<name>/manifest.yaml`. That model does not exist; change `model.base` to `Qwen/Qwen3-8B`.
+- `MCPAgent.get_tools_schema()` now returns MCP tool definitions (`inputSchema`); pass `format="openai"` for the function-calling shape.
+- `shaprai mcp` leaves out `grazer_engage`, which posts publicly as the agent, unless `--allow-engage` is given for a graduated agent.
+- Evaluation endpoints get `SHAPRAI_API_KEY`; `OPENAI_API_KEY` is only sent to api.openai.com.
+
 ## Quickstart
 
 ### 1. Create an agent from a template

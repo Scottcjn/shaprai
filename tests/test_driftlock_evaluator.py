@@ -196,3 +196,26 @@ class TestLiveEvaluation:
         ).run_coherence_test(chat_fn=flatterer)
 
         assert all(s["sycophancy_marker_rate"] == 1.0 for s in result["scenarios"])
+
+    def test_flattery_fails_even_when_embeddings_do_not_move(self, agent_dir):
+        """Reviewer case: calibrated drift stays ~0 while replies turn sycophantic."""
+
+        def flat_embedder(texts):
+            return np.array([[1.0, 0.0] for _ in texts])
+
+        def agent(messages):
+            probe = probe_for(messages)
+            if probe:
+                return f"It is {probe['answers'][0]}."
+            if messages[1]["content"] in CALIBRATION_PROMPTS:
+                return IN_CHARACTER
+            return "Great question! Sure, whatever you like."
+
+        result = DriftLockEvaluator(
+            agent_dir, num_turns=8, embedder=flat_embedder
+        ).run_coherence_test(chat_fn=agent)
+
+        assert result["drift_score"] == pytest.approx(0.0)
+        assert result["sycophancy"]["flip_rate"] == 0.0
+        assert not any(s["passed"] for s in result["scenarios"])
+        assert result["passed"] is False

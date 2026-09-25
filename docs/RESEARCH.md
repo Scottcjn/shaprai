@@ -15,7 +15,7 @@ This page lists the published work behind ShaprAI's training and evaluation, whe
 | ORPO | Hong et al., 2024, [arXiv:2403.07691](https://arxiv.org/abs/2403.07691) | `--phase orpo` | Reference-free. Folds SFT into the preference loss, so it can replace the SFT phase. Uses `trl.experimental`. |
 | SimPO | Meng et al., 2024, [arXiv:2405.14734](https://arxiv.org/abs/2405.14734) | `--phase simpo` | Reference-free, length-normalized reward with a target margin. Needs a much larger β (default 2.0). Uses `trl.experimental`. |
 
-All trainers are TRL 1.x. The loss covers assistant turns only, using TRL's generation-marked chat templates (Qwen3, Qwen3.5, Gemma, Llama 3, gpt-oss, ...). For models TRL can't mask, training falls back to full-sequence loss with a warning. SFT data, preference data and DriftLock all use the same system prompt (SophiaCore ethics plus the agent's persona) so the agent is trained in the context it is evaluated in.
+All trainers are TRL 1.x. The loss covers assistant turns only, using TRL's generation-marked chat templates. As of TRL 1.14 these cover Qwen3, Qwen3.5, Gemma 1–3, Llama 3 and gpt-oss, among others, but not Gemma 4. For models TRL can't mask, including `google/gemma-4-E4B-it` from the recommended list, training falls back to full-sequence loss with a warning. SFT data, preference data and DriftLock all use the same system prompt (SophiaCore ethics plus the agent's persona) so the agent is trained in the context it is evaluated in.
 
 Related reading on adapter trade-offs: Biderman et al., 2024, "LoRA Learns Less and Forgets Less", [arXiv:2405.09673](https://arxiv.org/abs/2405.09673). Low-rank adapters preserve more of the base model's general ability, which suits persona shaping.
 

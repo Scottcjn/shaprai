@@ -8,12 +8,24 @@ ensuring lightweight tool-using agents maintain Elyan-class identity.
 
 from __future__ import annotations
 
+import keyword
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from shaprai.sanctuary.principles import get_ethics_prompt
 
 logger = logging.getLogger(__name__)
+
+
+def to_identifier(name: str) -> str:
+    """smolagents requires agent names to be valid Python identifiers ('my-agent' -> 'my_agent')."""
+    ident = re.sub(r"\W", "_", name) or "agent"
+    if ident[0].isdigit():
+        ident = "_" + ident
+    if keyword.iskeyword(ident):
+        ident += "_"
+    return ident
 
 
 class ShaprSmolagent:
@@ -81,7 +93,7 @@ class ShaprSmolagent:
                 tools=self.tools,
                 model=model,
                 instructions=self.system_prompt,
-                name=self.name,
+                name=to_identifier(self.name),
             )
 
             logger.info(
