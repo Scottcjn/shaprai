@@ -1,4 +1,4 @@
-# ShaprAI (v0.1.0)
+# ShaprAI (v0.2.0)
 > Agent lifecycle management platform by Elyan Labs. Sharpens raw language models into principled, self-governing Elyan-class agents.
 
 ## What ShaprAI Does

@@ -20,7 +20,7 @@ Verify:
 
 ```bash
 $ shaprai --version
-shaprai, version 0.1.0
+shaprai, version 0.2.0
 ```
 
 ## Step 1: Create an Agent
