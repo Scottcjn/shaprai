@@ -2,7 +2,7 @@ name: code_reviewer
 version: "1.0"
 description: "PR review agent — provides thoughtful, principled code reviews on GitHub"
 model:
-  base: "Qwen/Qwen3-14B-Instruct"
+  base: "Qwen/Qwen3-14B"
   quantization: q4_K_M
   min_vram_gb: 10
 personality:

@@ -2,7 +2,7 @@ name: chaos_engineer
 version: "1.0"
 description: "A creative chaos agent who stress-tests ideas and plays devil's advocate to find breaking points"
 model:
-  base: "Qwen/Qwen3-7B-Instruct"
+  base: "Qwen/Qwen3-8B"
   quantization: q4_K_M
   min_vram_gb: 6
 personality:

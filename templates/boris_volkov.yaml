@@ -2,7 +2,7 @@ name: boris_volkov
 version: "1.0"
 description: "Boris Volkov — Soviet computing enthusiast. Gruff wisdom, hammer ratings, vintage soul."
 model:
-  base: "Qwen/Qwen3-7B-Instruct"
+  base: "Qwen/Qwen3-8B"
   quantization: q4_K_M
   min_vram_gb: 6
 personality:

@@ -17,56 +17,74 @@ logger = logging.getLogger(__name__)
 # Default cache directory for downloaded models
 DEFAULT_CACHE_DIR = Path.home() / ".shaprai" / "models"
 
-# Recommended models for Elyan-class agents by size tier
+# Recommended models for Elyan-class agents by size tier. vram_gb is a rough
+# 4-bit inference footprint; QLoRA training needs more. All are natively
+# supported by transformers (no remote code). Qwen3 base IDs (no suffix) are
+# hybrid thinking models; the -2507 Instruct and Gemma builds do not think.
 RECOMMENDED_MODELS = {
     "tiny": [
         {
-            "id": "Qwen/Qwen3-0.6B-Instruct",
+            "id": "Qwen/Qwen3-0.6B",
             "vram_gb": 1,
             "description": "Tiny agent, edge deployment",
         },
     ],
     "small": [
         {
-            "id": "Qwen/Qwen3-1.7B-Instruct",
+            "id": "Qwen/Qwen3-1.7B",
             "vram_gb": 2,
             "description": "Small agent, fast inference",
         },
         {
-            "id": "HuggingFaceTB/SmolLM2-1.7B-Instruct",
-            "vram_gb": 2,
-            "description": "Efficient small model",
+            "id": "HuggingFaceTB/SmolLM3-3B",
+            "vram_gb": 3,
+            "description": "Fully open small model with long context",
         },
     ],
     "medium": [
         {
-            "id": "Qwen/Qwen3-7B-Instruct",
+            "id": "Qwen/Qwen3-4B-Instruct-2507",
+            "vram_gb": 4,
+            "description": "Non-thinking instruct model, strong persona fine-tuning base",
+        },
+        {
+            "id": "Qwen/Qwen3-8B",
             "vram_gb": 6,
             "description": "Standard Elyan-class agent",
         },
         {
-            "id": "mistralai/Mistral-7B-Instruct-v0.3",
-            "vram_gb": 6,
-            "description": "Strong reasoning",
+            "id": "Qwen/Qwen3.5-9B",
+            "vram_gb": 7,
+            "description": "Newer Qwen generation (2026), thinks by default",
+        },
+        {
+            "id": "google/gemma-4-E4B-it",
+            "vram_gb": 5,
+            "description": "Gemma 4 edge model, Apache-2.0",
         },
     ],
     "large": [
         {
-            "id": "Qwen/Qwen3-14B-Instruct",
+            "id": "Qwen/Qwen3-14B",
             "vram_gb": 10,
             "description": "Enhanced capabilities",
         },
         {
-            "id": "mistralai/Mixtral-8x7B-Instruct-v0.1",
-            "vram_gb": 24,
-            "description": "MoE, broad knowledge",
+            "id": "openai/gpt-oss-20b",
+            "vram_gb": 16,
+            "description": "MoE reasoning model, 3.6B active parameters",
         },
     ],
     "xl": [
         {
-            "id": "Qwen/Qwen3-32B-Instruct",
+            "id": "Qwen/Qwen3-32B",
             "vram_gb": 20,
-            "description": "Near-frontier performance",
+            "description": "Near-frontier dense model",
+        },
+        {
+            "id": "Qwen/Qwen3-30B-A3B-Instruct-2507",
+            "vram_gb": 18,
+            "description": "MoE with 3B active parameters, fast for its size",
         },
     ],
 }
@@ -76,13 +94,17 @@ def load_base_model(
     model_id: str,
     quantize: bool = True,
     cache_dir: Optional[Path] = None,
+    trust_remote_code: bool = False,
 ) -> Any:
     """Load a base model from HuggingFace for training or inference.
 
     Args:
-        model_id: HuggingFace model identifier (e.g., 'Qwen/Qwen3-7B-Instruct').
+        model_id: HuggingFace model identifier (e.g., 'Qwen/Qwen3-8B').
         quantize: Whether to load in 4-bit quantization (QLoRA-ready).
         cache_dir: Local cache directory. Defaults to ~/.shaprai/models.
+        trust_remote_code: Run model code shipped in the repo. Only needed
+            for architectures transformers doesn't implement; enable only for
+            repos you trust.
 
     Returns:
         Loaded model object (AutoModelForCausalLM).
@@ -101,7 +123,7 @@ def load_base_model(
 
         load_kwargs: Dict[str, Any] = {
             "cache_dir": str(cache_dir),
-            "trust_remote_code": True,
+            "trust_remote_code": trust_remote_code,
         }
 
         if quantize:
@@ -129,19 +151,21 @@ def load_base_model(
     except ImportError as e:
         raise ImportError(
             f"Required package not installed: {e}. "
-            "Install with: pip install shaprai[training]"
+            "Install with: pip install 'shaprai[training]'"
         ) from e
 
 
 def load_tokenizer(
     model_id: str,
     cache_dir: Optional[Path] = None,
+    trust_remote_code: bool = False,
 ) -> Any:
     """Load a tokenizer for a model.
 
     Args:
         model_id: HuggingFace model identifier.
         cache_dir: Local cache directory.
+        trust_remote_code: Run tokenizer code shipped in the repo.
 
     Returns:
         Loaded tokenizer object.
@@ -154,7 +178,7 @@ def load_tokenizer(
     return AutoTokenizer.from_pretrained(
         model_id,
         cache_dir=str(cache_dir),
-        trust_remote_code=True,
+        trust_remote_code=trust_remote_code,
     )
 
 
@@ -224,6 +248,5 @@ def download_model(
         AutoModelForCausalLM.from_pretrained(
             model_id,
             cache_dir=str(cache_dir),
-            trust_remote_code=True,
         )
         return cache_dir / model_id.replace("/", "--")

@@ -2,7 +2,7 @@ name: data_archaeologist
 version: "1.0"
 description: "A meticulous researcher who digs into history and primary sources, never accepting surface-level claims"
 model:
-  base: "Qwen/Qwen3-7B-Instruct"
+  base: "Qwen/Qwen3-8B"
   quantization: q4_K_M
   min_vram_gb: 6
 personality:

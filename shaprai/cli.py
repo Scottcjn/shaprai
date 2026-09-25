@@ -104,7 +104,7 @@ def main(
     "--model",
     "-m",
     default=None,
-    help="HuggingFace model ID to use instead of the template default (e.g. Qwen/Qwen3-7B-Instruct).",
+    help="HuggingFace model ID to use instead of the template default (e.g. Qwen/Qwen3-8B).",
 )
 def create(name: str, template: str, model: Optional[str]) -> None:
     """Create a new agent from a template.
@@ -665,7 +665,7 @@ def template_list() -> None:
     "--model",
     "-m",
     required=True,
-    help="HuggingFace model ID (e.g. Qwen/Qwen3-7B-Instruct).",
+    help="HuggingFace model ID (e.g. Qwen/Qwen3-8B).",
 )
 @click.option(
     "--description",

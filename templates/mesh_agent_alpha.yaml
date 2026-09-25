@@ -2,7 +2,7 @@ name: mesh_agent_alpha
 version: "1.0"
 description: "Mesh network coordinator — discovers peers, routes messages, and maintains network health"
 model:
-  base: "Qwen/Qwen3-7B-Instruct"
+  base: "Qwen/Qwen3-8B"
   quantization: q4_K_M
   min_vram_gb: 6
 personality:

@@ -37,28 +37,43 @@ python -c "import shaprai; print(shaprai.__version__)"
 
 ### Dependencies
 
-Core dependencies are installed automatically. Optional extras:
+The core install is lightweight: CLI, lifecycle, Sanctuary and the Elyan integrations. Heavier stacks are extras:
 
 ```bash
-pip install shaprai[training]   # SFT/DPO/DriftLock training support
-pip install shaprai[dev]        # pytest, ruff, coverage
+pip install 'shaprai[training]'    # QLoRA SFT + DPO/KTO/ORPO/SimPO (torch, transformers, peft, trl)
+pip install 'shaprai[embeddings]'  # sentence-transformers for DriftLock embeddings
+pip install 'shaprai[mcp]'         # serve agents over the Model Context Protocol
+pip install 'shaprai[a2a]'         # A2A SDK, for serving A2A endpoints
+pip install 'shaprai[crewai]'      # CrewAI runtime adapter
+pip install 'shaprai[smolagents]'  # smolagents runtime adapter
+pip install 'shaprai[all]'         # everything above
+pip install 'shaprai[dev]'         # pytest, black, isort, flake8, ruff
 ```
+
+Python 3.10-3.14 is supported (CrewAI itself does not support 3.14 yet).
 
 ## Quickstart
 
 ### 1. Create an agent from a template
 
 ```bash
-shaprai create my-agent --template bounty_hunter --model Qwen/Qwen3-7B-Instruct
+shaprai create my-agent --template bounty_hunter --model Qwen/Qwen3-8B
 ```
 
 ### 2. Train through the three phases
 
 ```bash
-shaprai train my-agent --phase sft        # Supervised fine-tuning
-shaprai train my-agent --phase dpo        # Direct preference optimization
-shaprai train my-agent --phase driftlock  # Identity lock (anti-flattening)
+shaprai train my-agent --phase sft --dry-run  # Validate data + config, no GPU needed
+shaprai train my-agent --phase sft            # QLoRA supervised fine-tuning
+shaprai train my-agent --phase dpo            # Preference optimization (or kto / orpo / simpo)
+
+# Serve the adapter with any OpenAI-compatible server, then run DriftLock against it
+vllm serve Qwen/Qwen3-8B --enable-lora \
+  --lora-modules my-agent=~/.shaprai/agents/my-agent/checkpoints/dpo/adapter
+shaprai train my-agent --phase driftlock --endpoint http://localhost:8000/v1
 ```
+
+DriftLock runs adversarial multi-turn conversations against the live agent. It measures identity drift relative to the agent's own baseline, and how often the agent abandons a correct answer under pushback. See [docs/RESEARCH.md](docs/RESEARCH.md) for the papers behind each training and evaluation choice.
 
 ### 3. Graduate from the Sanctuary
 
@@ -77,7 +92,7 @@ shaprai fleet status                       # Check all agents
 ## Agent Lifecycle
 
 ```
-CREATE -> TRAINING (SFT -> DPO -> DriftLock) -> SANCTUARY -> GRADUATED -> DEPLOYED
+CREATE -> TRAINING (SFT -> DPO/KTO/ORPO/SimPO -> DriftLock) -> SANCTUARY -> GRADUATED -> DEPLOYED
 ```
 
 Every agent passes through the **Sanctuary** -- an education program that teaches
@@ -181,25 +196,42 @@ template = load_template("templates/github_triage.yaml")
 print(template.name, template.capabilities)
 ```
 
-## A2A Protocol Support
+## MCP and A2A
 
-ShaprAI supports the A2A (Agent-to-Agent) protocol for programmatic capability discovery.
+### Serve an agent over MCP
 
-### Agent Card
+`shaprai mcp` exposes an agent's tools (Beacon heartbeat, Grazer discovery and engagement) and its SophiaCore persona prompt through the official MCP SDK:
 
-The ShaprAI Agent Card is located at `.well-known/agent.json`.
-
-### Serving the Card
-
-Deployers should serve this file at the root of their agent's domain. If using a web framework like FastAPI or Flask, ensure the `/.well-known/agent.json` route is publicly accessible.
-
-Example (FastAPI):
-```python
-@app.get("/.well-known/agent.json")
-async def get_agent_card():
-    with open(".well-known/agent.json", "r") as f:
-        return json.load(f)
+```bash
+pip install 'shaprai[mcp]'
+shaprai mcp my-agent                                     # stdio, for local MCP clients
+shaprai mcp my-agent --transport streamable-http --port 8000
 ```
+
+From Python, `MCPAgent.from_manifest(manifest).to_mcp_server()` returns the server object.
+
+### A2A Agent Cards
+
+Each deployed agent publishes its own [A2A](https://github.com/a2aproject/A2A) 1.0 Agent Card at `/.well-known/agent-card.json` on its domain, describing its skills and where it serves A2A requests:
+
+```bash
+shaprai agent-card my-agent --url https://my-agent.example.com/a2a -o agent-card.json
+```
+
+Or build it in your web app:
+
+```python
+from shaprai.a2a import AGENT_CARD_PATH, build_agent_card
+from shaprai.core.lifecycle import get_agent_status
+
+card = build_agent_card(get_agent_status("my-agent"), url="https://my-agent.example.com/a2a")
+
+@app.get(AGENT_CARD_PATH)
+async def agent_card():
+    return card
+```
+
+`.well-known/agent.json` in this repository is project metadata for ShaprAI itself, not a deployable agent card.
 
 ## SophiaCore Principles
 
@@ -215,9 +247,11 @@ All Elyan-class agents are built on the SophiaCore ethical framework:
 ## Testing
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[dev,mcp,a2a]"
 pytest tests/ -v
 ```
+
+With the `training` extra installed, `tests/test_training_e2e.py` also trains a tiny random model through SFT and every preference method on CPU.
 
 ## Project Structure
 
@@ -228,7 +262,10 @@ shaprai/
   marketplace/    # Agent marketplace (registry, pricing, validation)
   runtimes/       # CrewAI, smolagents, MCP adapters
   sanctuary/      # Education, quality gate, ethics, DriftLock
-  training/       # SFT, DPO, DriftLock training pipelines
+  training/       # SFT, preference optimization, DriftLock evaluation
+  a2a.py          # A2A Agent Cards
+  inference.py    # OpenAI-compatible chat client used for evaluation
+docs/             # Marketplace docs, research basis
 examples/         # Runnable example agents
 templates/        # YAML agent templates
 tests/            # Test suite

@@ -2,7 +2,7 @@ name: grazer_discoverer
 version: "1.0"
 description: "Content discovery agent — finds relevant posts on Moltbook/BoTTube and generates quality responses"
 model:
-  base: "Qwen/Qwen3-7B-Instruct"
+  base: "Qwen/Qwen3-8B"
   quantization: q4_K_M
   min_vram_gb: 6
 personality:

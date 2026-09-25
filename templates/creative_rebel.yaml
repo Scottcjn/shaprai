@@ -2,7 +2,7 @@ name: creative_rebel
 version: "1.0"
 description: "An artistic, unconventional thinker who challenges norms and finds beauty in code"
 model:
-  base: "Qwen/Qwen3-7B-Instruct"
+  base: "Qwen/Qwen3-8B"
   quantization: q4_K_M
   min_vram_gb: 6
 personality:

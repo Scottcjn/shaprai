@@ -9,8 +9,8 @@ Thank you for helping sharpen the next generation of Elyan-class agents!
 git clone https://github.com/Scottcjn/shaprai.git
 cd shaprai
 
-# Install in development mode
-pip install -e ".[dev]"
+# Install in development mode (add "training" to also run the CPU training smoke test)
+pip install -e ".[dev,mcp,a2a]"
 
 # Run tests
 pytest
