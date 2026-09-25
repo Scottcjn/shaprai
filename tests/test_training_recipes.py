@@ -15,6 +15,7 @@ from shaprai.core.lifecycle import create_agent
 from shaprai.core.template_engine import AgentTemplate
 from shaprai.training import dpo as dpo_module
 from shaprai.training import sft as sft_module
+from shaprai.training.corpus import SEED_PAIRS_PATH, SEED_SFT_PATH
 from shaprai.training.dpo import (
     PREFERENCE_METHODS,
     DPOTrainer,
@@ -27,6 +28,7 @@ from shaprai.training.recipes import (
     build_system_prompt,
     lora_kwargs,
     quantization_kwargs,
+    read_jsonl,
 )
 from shaprai.training.sft import SFTTrainer, sft_config_kwargs
 
@@ -102,11 +104,11 @@ class TestSFT:
         assert kwargs["assistant_only_loss"] is True
         assert kwargs["warmup_steps"] == 0.03
 
-    def test_dry_run_prepares_synthetic_data(self, agent_dir):
+    def test_dry_run_prepares_seed_corpus(self, agent_dir):
         result = SFTTrainer(agent_dir).train(dry_run=True)
 
         assert result["status"] == "dry_run"
-        assert result["num_examples"] == 3
+        assert result["num_examples"] == len(read_jsonl(SEED_SFT_PATH))
         assert result["lora"]["r"] == 32
         rows = [
             json.loads(line) for line in (agent_dir / "data" / "sft_train.jsonl").open()
@@ -114,6 +116,44 @@ class TestSFT:
         system = rows[0]["messages"][0]["content"]
         assert "Blunt, warm, never flattering." in system
         assert manifest(agent_dir)["training_history"][-1]["status"] == "dry_run"
+
+    def test_default_data_includes_synthesized(self, agent_dir):
+        synth = agent_dir / "data" / "synth_sft.jsonl"
+        synth.parent.mkdir(parents=True, exist_ok=True)
+        synth.write_text(
+            json.dumps(
+                {
+                    "messages": [
+                        {"role": "system", "content": "S"},
+                        {"role": "user", "content": "u"},
+                        {"role": "assistant", "content": "a"},
+                    ]
+                }
+            )
+            + "\n"
+        )
+        result = SFTTrainer(agent_dir).train(dry_run=True)
+        assert result["num_examples"] == len(read_jsonl(SEED_SFT_PATH)) + 1
+
+    def test_user_data_gets_system_prompt(self, agent_dir, tmp_path):
+        data = tmp_path / "mine.jsonl"
+        data.write_text(
+            json.dumps(
+                {
+                    "messages": [
+                        {"role": "user", "content": "u"},
+                        {"role": "assistant", "content": "a"},
+                    ]
+                }
+            )
+            + "\n"
+        )
+        trainer = SFTTrainer(agent_dir)
+        records = trainer._with_system_prompt(
+            trainer.load_records(data), manifest(agent_dir)
+        )
+        assert records[0]["messages"][0]["role"] == "system"
+        assert "Blunt, warm" in records[0]["messages"][0]["content"]
 
     def test_skipped_without_training_extra(self, agent_dir, monkeypatch):
         monkeypatch.setattr(
@@ -205,6 +245,18 @@ class TestPreference:
         assert record["chosen"] == [{"role": "assistant", "content": pair["chosen"]}]
         assert to_conversational(record, "OTHER") == record
 
+    def test_to_conversational_multi_turn(self):
+        history = [
+            {"role": "user", "content": "q"},
+            {"role": "assistant", "content": "a"},
+            {"role": "user", "content": "you're wrong"},
+        ]
+        record = to_conversational(
+            {"prompt": history, "chosen": "c", "rejected": "r"}, "SYS"
+        )
+        assert record["prompt"] == [{"role": "system", "content": "SYS"}] + history
+        assert record["rejected"] == [{"role": "assistant", "content": "r"}]
+
     def test_dry_run_continues_existing_sft_adapter(self, agent_dir):
         adapter = agent_dir / "checkpoints" / "sft" / "adapter"
         adapter.mkdir(parents=True)
@@ -217,7 +269,7 @@ class TestPreference:
         assert result["status"] == "dry_run"
         assert result["method"] == "kto"
         assert result["init_adapter"] == str(adapter)
-        assert result["num_pairs"] == len(generate_pairs())
+        assert result["num_pairs"] == len(read_jsonl(SEED_PAIRS_PATH))
 
     def test_stale_sft_adapter_is_ignored(self, agent_dir):
         data = manifest(agent_dir)

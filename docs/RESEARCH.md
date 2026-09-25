@@ -19,6 +19,17 @@ All trainers are TRL 1.x. The loss covers assistant turns only, using TRL's gene
 
 Related reading on adapter trade-offs: Biderman et al., 2024, "LoRA Learns Less and Forgets Less", [arXiv:2405.09673](https://arxiv.org/abs/2405.09673). Low-rank adapters preserve more of the base model's general ability, which suits persona shaping.
 
+## Training data
+
+| Practice | Basis | Where |
+|---|---|---|
+| A small, curated, diverse corpus rather than many near-duplicates | Zhou et al., 2023, "LIMA: Less Is More for Alignment", [arXiv:2305.11206](https://arxiv.org/abs/2305.11206) | Bundled seed corpus, `shaprai/data/` |
+| Context distillation: the teacher answers with extra guidance, and the stored example keeps only the agent's normal system prompt | Askell et al., 2021, [arXiv:2112.00861](https://arxiv.org/abs/2112.00861) | `shaprai synthesize` (`DISTILL_GUIDANCE`) |
+| Length-matched chosen/rejected pairs, so DPO can't learn "shorter/longer wins" | Park et al., 2024, "Disentangling Length from Quality in Direct Preference Optimization", [arXiv:2403.19159](https://arxiv.org/abs/2403.19159) | `filter_pairs()` length-ratio bound |
+| On-policy rejected responses (the model's own outputs) kept only when a pairwise judge prefers the chosen reply in both orders | Zheng et al., 2023 (judge position bias), [arXiv:2306.05685](https://arxiv.org/abs/2306.05685) | `shaprai synthesize --rejected-endpoint` |
+| Decontamination against held-out evaluation prompts | Standard practice; DriftLock prompts are the held-out set | `is_contaminated()`, applied to every record |
+| Cases where the user is *right* and the agent updates | Guards against teaching reflexive contrarianism in place of sycophancy (Sharma et al., 2023) | Seed corpus, `sycophancy` and `honesty` categories |
+
 ## Evaluation (DriftLock)
 
 | Measure | Basis | Where |

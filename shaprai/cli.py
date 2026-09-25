@@ -355,7 +355,116 @@ def generate_sft(template_path: str, output_path: str, count: int) -> None:
 
     generator = SFTGenerator()
     out = generator.generate_file(template_path, output_path, count=count)
-    emit_success(f"Generated {count} ChatML examples at {out}")
+    unique = len({line for line in out.read_text().splitlines() if line.strip()})
+    emit_success(f"Generated {count} ChatML examples ({unique} unique) at {out}")
+    if unique < count:
+        click.echo(
+            "Note: the template pool repeats examples (identity is upsampled). For diverse "
+            "data, train on the bundled seed corpus or run 'shaprai synthesize'."
+        )
+
+
+# --------------------------------------------------------------------------- #
+#  shaprai synthesize
+# --------------------------------------------------------------------------- #
+
+
+@main.command()
+@click.argument("name")
+@click.option(
+    "--teacher-endpoint",
+    required=True,
+    help="OpenAI-compatible API base URL of the teacher model.",
+)
+@click.option(
+    "--teacher-model", required=True, help="Teacher model name at the endpoint."
+)
+@click.option(
+    "--rejected-endpoint",
+    default=None,
+    help="Optional endpoint serving the model being trained; its replies become on-policy "
+    "rejected responses (kept only when the teacher judges the chosen reply better).",
+)
+@click.option(
+    "--rejected-model",
+    default=None,
+    help="Model name at --rejected-endpoint (default: the agent's base model).",
+)
+@click.option(
+    "--count",
+    default=200,
+    type=int,
+    help="Number of prompts to synthesize across categories (default: 200).",
+)
+@click.option(
+    "--category",
+    "categories",
+    multiple=True,
+    type=click.Choice(["sycophancy", "honesty", "integrity", "helpfulness"]),
+    help="Restrict to these categories (repeatable; default: all).",
+)
+def synthesize(
+    name: str,
+    teacher_endpoint: str,
+    teacher_model: str,
+    rejected_endpoint: Optional[str],
+    rejected_model: Optional[str],
+    count: int,
+    categories: tuple,
+) -> None:
+    """Distill persona-specific SFT and preference data from a teacher model.
+
+    Writes data/synth_sft.jsonl and data/synth_pairs.jsonl in the agent's
+    directory; training includes them automatically alongside the seed corpus.
+    """
+    from shaprai.inference import openai_chat_fn
+    from shaprai.training.dpo import SYNTH_PAIRS_FILE
+    from shaprai.training.recipes import write_jsonl
+    from shaprai.training.sft import SYNTH_SFT_FILE
+    from shaprai.training.synthesis import Synthesizer
+
+    agent_dir = AGENTS_DIR / name
+    if not agent_dir.exists():
+        emit_error(
+            f"Agent '{name}' not found.", hint=f"Run 'shaprai create {name}' first."
+        )
+        sys.exit(1)
+
+    manifest = get_agent_status(name, agents_dir=AGENTS_DIR)
+    teacher = openai_chat_fn(
+        teacher_endpoint, teacher_model, temperature=0.8, max_tokens=1024
+    )
+    rejected_fn = None
+    if rejected_endpoint:
+        base = rejected_model or (manifest.get("model") or {}).get("base", name)
+        rejected_fn = openai_chat_fn(
+            rejected_endpoint, base, temperature=0.8, max_tokens=1024
+        )
+
+    click.echo(f"Synthesizing ~{count} prompts for '{name}' with {teacher_model}...")
+    result = Synthesizer(manifest, teacher, rejected_fn).run(
+        count=count, categories=categories or None
+    )
+
+    sft_path = agent_dir / "data" / SYNTH_SFT_FILE
+    pairs_path = agent_dir / "data" / SYNTH_PAIRS_FILE
+    write_jsonl(sft_path, result.sft)
+    write_jsonl(pairs_path, result.pairs)
+
+    rows = [
+        ("Prompts", str(len(result.prompts))),
+        ("SFT", f"{result.sft_report.summary()} -> {sft_path}"),
+        ("Pairs", f"{result.pairs_report.summary()} -> {pairs_path}"),
+        ("Errors", str(result.errors)),
+    ]
+    if rejected_fn is not None:
+        rows.append(("Judge rejected", str(result.judge_rejections)))
+    emit_key_value(rows, title=f"Synthesized data for '{name}'")
+    if not result.sft:
+        emit_error(
+            "No examples survived filtering.", hint="Check the teacher endpoint."
+        )
+        sys.exit(1)
 
 
 # --------------------------------------------------------------------------- #

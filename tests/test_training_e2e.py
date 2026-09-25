@@ -7,6 +7,7 @@ of the SFT adapter) on CPU in seconds. Skipped unless the ``training`` extra
 is installed: pip install 'shaprai[training]'.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -19,7 +20,9 @@ pytest.importorskip("datasets")
 
 from shaprai.core.lifecycle import create_agent  # noqa: E402
 from shaprai.core.template_engine import AgentTemplate  # noqa: E402
+from shaprai.training.corpus import SEED_PAIRS_PATH, SEED_SFT_PATH  # noqa: E402
 from shaprai.training.dpo import PREFERENCE_METHODS, DPOTrainer  # noqa: E402
+from shaprai.training.recipes import read_jsonl, write_jsonl  # noqa: E402
 from shaprai.training.sft import SFTTrainer  # noqa: E402
 
 pytestmark = pytest.mark.slow
@@ -42,13 +45,12 @@ def tiny_model(tmp_path_factory):
     from tokenizers import Tokenizer, models, pre_tokenizers, trainers
     from transformers import PreTrainedTokenizerFast, Qwen3Config, Qwen3ForCausalLM
 
-    from shaprai.training.dpo import generate_pairs
     from shaprai.training.recipes import build_system_prompt
 
     specials = ["<|endoftext|>", "<|im_start|>", "<|im_end|>", "<think>", "</think>"]
-    corpus = [build_system_prompt({"name": "x"})] + [
-        f"{p['prompt']} {p['chosen']} {p['rejected']}" for p in generate_pairs()
-    ]
+    corpus = [build_system_prompt({"name": "x"})]
+    corpus += [m["content"] for r in read_jsonl(SEED_SFT_PATH) for m in r["messages"]]
+    corpus += [json.dumps(p) for p in read_jsonl(SEED_PAIRS_PATH)]
     tok = Tokenizer(models.WordLevel(unk_token="<|endoftext|>"))
     tok.pre_tokenizer = pre_tokenizers.Sequence(
         [pre_tokenizers.Whitespace(), pre_tokenizers.Split("\n", behavior="isolated")]
@@ -98,15 +100,33 @@ def manifest(agent_dir):
     return yaml.safe_load((agent_dir / "manifest.yaml").read_text())
 
 
-def test_sft_then_each_preference_method(agent_dir):
-    sft = SFTTrainer(agent_dir).train(epochs=1)
+@pytest.fixture
+def small_data(tmp_path):
+    """A few seed records, including multi-turn preference prompts, to keep CPU runs short."""
+    sft_rows = read_jsonl(SEED_SFT_PATH)
+    pair_rows = read_jsonl(SEED_PAIRS_PATH)
+    multi = [p for p in pair_rows if isinstance(p["prompt"], list)][:3]
+    single = [p for p in pair_rows if isinstance(p["prompt"], str)][:3]
+    sft_path, pairs_path = tmp_path / "sft.jsonl", tmp_path / "pairs.jsonl"
+    write_jsonl(
+        sft_path, sft_rows[:4] + [r for r in sft_rows if len(r["messages"]) > 2][:2]
+    )
+    write_jsonl(pairs_path, single + multi)
+    return str(sft_path), str(pairs_path)
+
+
+def test_sft_then_each_preference_method(agent_dir, small_data):
+    sft_data, pair_data = small_data
+    sft = SFTTrainer(agent_dir).train(data_path=sft_data, epochs=1)
     assert sft["status"] == "completed", sft.get("reason")
     assert sft["assistant_only_loss"] is True  # Qwen3 template gets patched masks
     assert (Path(sft["adapter_path"]) / "adapter_config.json").exists()
     assert manifest(agent_dir)["model"]["sft_adapter"] == sft["adapter_path"]
 
     for method in PREFERENCE_METHODS:
-        result = DPOTrainer(agent_dir, method=method).train(epochs=1)
+        result = DPOTrainer(agent_dir, method=method).train(
+            pairs_path=pair_data, epochs=1
+        )
         assert result["status"] == "completed", f"{method}: {result.get('reason')}"
         assert result["init_adapter"] == sft["adapter_path"]
         assert (Path(result["adapter_path"]) / "adapter_config.json").exists()
@@ -116,8 +136,10 @@ def test_sft_then_each_preference_method(agent_dir):
     assert history == ["sft", *PREFERENCE_METHODS]
 
 
-def test_preference_without_sft_starts_fresh_adapter(agent_dir):
-    result = DPOTrainer(agent_dir, method="orpo").train(epochs=1)
+def test_preference_without_sft_starts_fresh_adapter(agent_dir, small_data):
+    result = DPOTrainer(agent_dir, method="orpo").train(
+        pairs_path=small_data[1], epochs=1
+    )
 
     assert result["status"] == "completed", result.get("reason")
     assert result["init_adapter"] is None

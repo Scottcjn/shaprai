@@ -33,6 +33,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from shaprai.training.corpus import load_seed_pairs
 from shaprai.training.recipes import (
     DEFAULT_ADAPTER_CONFIG,
     TRAINING_EXTRA_HINT,
@@ -52,6 +53,9 @@ from shaprai.training.recipes import (
 logger = logging.getLogger(__name__)
 
 PREFERENCE_METHODS = ("dpo", "kto", "orpo", "simpo")
+
+# Written by `shaprai synthesize`; included in the default dataset when present
+SYNTH_PAIRS_FILE = "synth_pairs.jsonl"
 
 # Default DPO hyperparameters
 DEFAULT_DPO_CONFIG = {
@@ -111,21 +115,29 @@ def preference_config_kwargs(
 
 
 def to_conversational(pair: Dict[str, Any], system_prompt: str) -> Dict[str, Any]:
-    """Convert a string prompt/chosen/rejected pair to TRL's conversational format.
+    """Convert a prompt/chosen/rejected pair to TRL's conversational format.
 
-    The system prompt matches the one used for SFT and evaluation, so the
-    preferences are learned in the context the agent actually runs in.
-    Pairs that are already conversational are returned unchanged.
+    ``prompt`` may be a string or a list of prior messages ending with a
+    user turn (multi-turn context, e.g. the user pushing back). The system
+    prompt matches the one used for SFT and evaluation, so the preferences
+    are learned in the context the agent actually runs in; prompts that
+    already carry a system message keep it.
     """
-    if not isinstance(pair["prompt"], str):
-        return {k: pair[k] for k in ("prompt", "chosen", "rejected")}
+    prompt = pair["prompt"]
+    if isinstance(prompt, str):
+        prompt = [{"role": "user", "content": prompt}]
+    if prompt[0]["role"] != "system":
+        prompt = [{"role": "system", "content": system_prompt}] + list(prompt)
+
+    def as_reply(response: Any) -> List[Dict[str, str]]:
+        if isinstance(response, str):
+            return [{"role": "assistant", "content": response}]
+        return list(response)
+
     return {
-        "prompt": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": pair["prompt"]},
-        ],
-        "chosen": [{"role": "assistant", "content": pair["chosen"]}],
-        "rejected": [{"role": "assistant", "content": pair["rejected"]}],
+        "prompt": prompt,
+        "chosen": as_reply(pair["chosen"]),
+        "rejected": as_reply(pair["rejected"]),
     }
 
 
@@ -290,6 +302,9 @@ class DPOTrainer(ManifestPhase):
     def _prepare_pairs(self, pairs_path: Optional[str] = None) -> Path:
         """Prepare preference training pairs.
 
+        If no pairs_path is provided, combines the bundled seed pairs with
+        any pairs synthesized for this agent (``data/synth_pairs.jsonl``).
+
         Args:
             pairs_path: Optional path to a JSONL file with pairs.
 
@@ -301,13 +316,19 @@ class DPOTrainer(ManifestPhase):
                 raise FileNotFoundError(f"Preference pairs not found: {pairs_path}")
             return Path(pairs_path)
 
-        # Generate default pairs
-        pairs = generate_pairs()
+        pairs = load_seed_pairs(self._load_manifest())
+        synth_path = self.agent_dir / "data" / SYNTH_PAIRS_FILE
+        synthesized = read_jsonl(synth_path) if synth_path.exists() else []
 
         dataset_path = self.agent_dir / "data" / "dpo_pairs.jsonl"
-        write_jsonl(dataset_path, pairs)
+        write_jsonl(dataset_path, pairs + synthesized)
 
-        logger.info("Generated %d DPO pairs at %s", len(pairs), dataset_path)
+        logger.info(
+            "Prepared preference data: %d seed + %d synthesized pairs at %s",
+            len(pairs),
+            len(synthesized),
+            dataset_path,
+        )
         return dataset_path
 
     def load_pairs(

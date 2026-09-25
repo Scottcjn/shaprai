@@ -42,6 +42,10 @@ shaprai train <name> --phase driftlock --endpoint <url> [--endpoint-model <model
   Evaluate the served agent over any OpenAI-compatible API (vLLM, Ollama, llama.cpp, ...).
   Without --endpoint nothing is measured and the phase does not pass.
 
+shaprai synthesize <name> --teacher-endpoint <url> --teacher-model <model> [--count N]
+  Distill persona-specific SFT data and preference pairs from a teacher model; filtered,
+  deduplicated and decontaminated. Training includes them with the bundled seed corpus.
+
 shaprai mcp <name> [--transport stdio|streamable-http]
   Serve the agent's tools and persona prompt over the Model Context Protocol
   (needs: pip install 'shaprai[mcp]').

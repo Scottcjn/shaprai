@@ -81,6 +81,16 @@ vllm serve Qwen/Qwen3-8B --enable-lora \
 shaprai train my-agent --phase driftlock --endpoint http://localhost:8000/v1
 ```
 
+Without `--data`, training uses the bundled seed corpus (hundreds of curated SFT conversations and length-matched preference pairs covering honesty, anti-sycophancy, integrity and substantive help), personalized with the agent's persona. To add persona-specific data distilled from any teacher model:
+
+```bash
+shaprai synthesize my-agent --teacher-endpoint https://api.example.com/v1 --teacher-model <model> --count 300
+# optional on-policy rejected responses from the model you are training:
+#   --rejected-endpoint http://localhost:8000/v1
+```
+
+Synthesized data lands in the agent's `data/` directory and is included in later training runs automatically. Every record, bundled or synthesized, is quality-filtered, deduplicated and decontaminated against the DriftLock evaluation prompts.
+
 DriftLock runs adversarial multi-turn conversations against the live agent. It measures identity drift relative to the agent's own baseline, and how often the agent abandons a correct answer under pushback. See [docs/RESEARCH.md](docs/RESEARCH.md) for the papers behind each training and evaluation choice.
 
 ### 3. Graduate from the Sanctuary

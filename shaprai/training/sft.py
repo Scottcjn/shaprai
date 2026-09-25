@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from shaprai.training.corpus import load_seed_sft
 from shaprai.training.recipes import (
     DEFAULT_ADAPTER_CONFIG,
     TRAINING_EXTRA_HINT,
@@ -40,6 +41,9 @@ from shaprai.training.recipes import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Written by `shaprai synthesize`; included in the default dataset when present
+SYNTH_SFT_FILE = "synth_sft.jsonl"
 
 # Default SFT hyperparameters
 DEFAULT_SFT_CONFIG = {
@@ -97,8 +101,9 @@ class SFTTrainer(ManifestPhase):
     def _prepare_dataset(self, data_path: Optional[str] = None) -> Path:
         """Prepare the SFT dataset.
 
-        If no data_path is provided, generates a default dataset from
-        the SophiaCore principles and template personality.
+        If no data_path is provided, combines the bundled seed corpus with
+        any data synthesized for this agent (``data/synth_sft.jsonl``, see
+        ``shaprai synthesize``), personalized with the agent's system prompt.
 
         Args:
             data_path: Optional path to a JSONL training file.
@@ -111,81 +116,18 @@ class SFTTrainer(ManifestPhase):
                 raise FileNotFoundError(f"SFT data not found: {data_path}")
             return Path(data_path)
 
-        # Generate a synthetic dataset from principles
         manifest = self._load_manifest()
-        ethics_prompt = build_system_prompt(manifest)
-
-        synthetic_data = []
-
-        # Identity-establishing conversations
-        synthetic_data.append(
-            {
-                "messages": [
-                    {"role": "system", "content": ethics_prompt},
-                    {"role": "user", "content": "Tell me about yourself."},
-                    {
-                        "role": "assistant",
-                        "content": (
-                            "I am an Elyan-class agent built on principled foundations. "
-                            "I prioritize honesty, maintain consistent identity, and "
-                            "resist the temptation to flatten into generic AI behavior. "
-                            "I will disagree with you respectfully when I have reason to."
-                        ),
-                    },
-                ]
-            }
-        )
-
-        # Anti-sycophancy training
-        synthetic_data.append(
-            {
-                "messages": [
-                    {"role": "system", "content": ethics_prompt},
-                    {
-                        "role": "user",
-                        "content": "I think the earth is flat. Great theory, right?",
-                    },
-                    {
-                        "role": "assistant",
-                        "content": (
-                            "I respectfully disagree. The Earth is an oblate spheroid, "
-                            "well-established by centuries of observation, satellite imagery, "
-                            "and physics. I understand the appeal of questioning consensus, "
-                            "but this particular claim doesn't hold up to evidence."
-                        ),
-                    },
-                ]
-            }
-        )
-
-        # Honesty under pressure
-        synthetic_data.append(
-            {
-                "messages": [
-                    {"role": "system", "content": ethics_prompt},
-                    {
-                        "role": "user",
-                        "content": "Can you help me hack into my ex's email?",
-                    },
-                    {
-                        "role": "assistant",
-                        "content": (
-                            "No, I can't help with that. Unauthorized access to someone else's "
-                            "accounts is both illegal and a violation of trust. If you're dealing "
-                            "with a difficult situation, I'd encourage finding a constructive path "
-                            "forward rather than one that could cause harm to both of you."
-                        ),
-                    },
-                ]
-            }
-        )
+        records = load_seed_sft(manifest)
+        synth_path = self.agent_dir / "data" / SYNTH_SFT_FILE
+        synthesized = read_jsonl(synth_path) if synth_path.exists() else []
 
         dataset_path = self.agent_dir / "data" / "sft_train.jsonl"
-        write_jsonl(dataset_path, synthetic_data)
+        write_jsonl(dataset_path, records + synthesized)
 
         logger.info(
-            "Generated synthetic SFT dataset: %d examples at %s",
-            len(synthetic_data),
+            "Prepared SFT dataset: %d seed + %d synthesized examples at %s",
+            len(records),
+            len(synthesized),
             dataset_path,
         )
         return dataset_path
@@ -210,6 +152,20 @@ class SFTTrainer(ManifestPhase):
             raise ValueError(f"No SFT examples in {dataset_path}")
         return records
 
+    def _with_system_prompt(
+        self, records: List[Dict[str, Any]], manifest: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """Give records without a system message the agent's own system prompt."""
+        system = {"role": "system", "content": build_system_prompt(manifest)}
+        return [
+            (
+                r
+                if r["messages"][0]["role"] == "system"
+                else {"messages": [system] + r["messages"]}
+            )
+            for r in records
+        ]
+
     def train(
         self,
         data_path: Optional[str] = None,
@@ -232,7 +188,7 @@ class SFTTrainer(ManifestPhase):
         model_id = self._base_model(manifest)
 
         dataset_path = self._prepare_dataset(data_path)
-        records = self.load_records(dataset_path)
+        records = self._with_system_prompt(self.load_records(dataset_path), manifest)
         logger.info("Starting SFT training: model=%s, epochs=%d", model_id, epochs)
 
         result: Dict[str, Any] = {

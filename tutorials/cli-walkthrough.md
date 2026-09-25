@@ -71,7 +71,19 @@ Phase 'sft' complete for 'my-agent'.
   Train loss:  ...
 ```
 
-You can generate training data from templates first:
+Without `--data`, training uses the bundled seed corpus, personalized with your agent's persona. To grow persona-specific data, distill it from a stronger teacher model behind any OpenAI-compatible API:
+
+```bash
+$ shaprai synthesize my-agent --teacher-endpoint https://api.example.com/v1 --teacher-model <model> --count 300
+Synthesized data for 'my-agent'
+  Prompts:  ...
+  SFT:      kept .../... -> ~/.shaprai/agents/my-agent/data/synth_sft.jsonl
+  Pairs:    kept .../... -> ~/.shaprai/agents/my-agent/data/synth_pairs.jsonl
+```
+
+The next `shaprai train` run picks these files up automatically. Skim a sample before training; a teacher's mistakes become your agent's habits.
+
+You can also generate simple template-based data:
 
 ```bash
 $ shaprai generate-sft --template templates/sophia_elya.yaml --output data/sophia_sft.jsonl --count 1000

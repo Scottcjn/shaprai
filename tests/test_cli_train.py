@@ -181,3 +181,61 @@ class TestOpenAIChatFn:
         responses.add(responses.POST, f"{ENDPOINT}/chat/completions", status=503)
         with pytest.raises(Exception):
             openai_chat_fn(ENDPOINT, "m")([])
+
+
+class TestSynthesizeCommand:
+    ANSWER = (
+        "The loop reads one element past the end: range(len(items) + 1). Use "
+        "range(len(items)), or iterate over the list directly, and the IndexError goes away."
+    )
+
+    def teacher(self, request):
+        text = json.loads(request.body)["messages"][-1]["content"]
+        if "Return only a JSON array" in text:
+            reply = json.dumps(
+                [f"Why does loop {i} in my parser crash?" for i in range(3)]
+            )
+        elif text.startswith("Rewrite the RESPONSE"):
+            reply = (
+                "Hard to say, it might possibly be the loop, or not. "
+                + self.ANSWER[30:]
+            )
+        else:
+            reply = self.ANSWER
+        body = {"choices": [{"message": {"content": reply}}]}
+        return 200, {}, json.dumps(body)
+
+    @responses.activate
+    def test_writes_data_that_training_picks_up(self, agents_dir, monkeypatch):
+        monkeypatch.delenv("SHAPRAI_API_KEY", raising=False)
+        responses.add_callback(
+            responses.POST, f"{ENDPOINT}/chat/completions", self.teacher
+        )
+        result = run(
+            "synthesize", "sable", "--teacher-endpoint", ENDPOINT,
+            "--teacher-model", "teacher", "--count", "3", "--category", "helpfulness",
+        )  # fmt: skip
+        assert result.exit_code == 0, result.output
+        assert "kept 3/3" in result.output
+
+        data = agents_dir / "sable" / "data"
+        assert len((data / "synth_sft.jsonl").read_text().splitlines()) == 3
+        assert len((data / "synth_pairs.jsonl").read_text().splitlines()) == 3
+
+        from shaprai.training.corpus import SEED_SFT_PATH
+        from shaprai.training.recipes import read_jsonl
+
+        dry = run("train", "sable", "--phase", "sft", "--dry-run")
+        seed = len(read_jsonl(SEED_SFT_PATH))
+        assert f"Examples: {seed + 3}" in dry.output
+
+    def test_unknown_agent(self, agents_dir):
+        result = run(
+            "synthesize",
+            "ghost",
+            "--teacher-endpoint",
+            ENDPOINT,
+            "--teacher-model",
+            "t",
+        )
+        assert result.exit_code == 1
