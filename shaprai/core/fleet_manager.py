@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import yaml
 
-from shaprai.core.lifecycle import AgentState
+from shaprai.core.lifecycle import AgentState, agent_path
 
 
 class FleetManager:
@@ -45,9 +45,12 @@ class FleetManager:
 
         Args:
             agent_manifest: The agent's manifest dictionary. Must contain 'name'.
+
+        Raises:
+            ValueError: If the name would place the agent outside agents_dir.
         """
         name = agent_manifest["name"]
-        agent_dir = self.agents_dir / name
+        agent_dir = agent_path(self.agents_dir, name)
         agent_dir.mkdir(parents=True, exist_ok=True)
 
         manifest_path = agent_dir / "manifest.yaml"
@@ -68,10 +71,19 @@ class FleetManager:
         Returns:
             List of agent manifest dictionaries.
         """
-        agents: List[Dict[str, Any]] = []
+        return [
+            manifest
+            for _, manifest in self._iter_agents(state_filter, platform_filter)
+        ]
 
+    def _iter_agents(
+        self,
+        state_filter: Optional[AgentState] = None,
+        platform_filter: Optional[str] = None,
+    ) -> Iterator[Tuple[Path, Dict[str, Any]]]:
+        """Yield (agent directory, manifest) for each readable agent."""
         if not self.agents_dir.exists():
-            return agents
+            return
 
         for agent_dir in sorted(self.agents_dir.iterdir()):
             manifest_path = agent_dir / "manifest.yaml"
@@ -93,9 +105,7 @@ class FleetManager:
             if platform_filter and platform_filter not in manifest.get("platforms", []):
                 continue
 
-            agents.append(manifest)
-
-        return agents
+            yield agent_dir, manifest
 
     def get_agent(self, name: str) -> Optional[Dict[str, Any]]:
         """Get a specific agent's manifest.
@@ -105,8 +115,11 @@ class FleetManager:
 
         Returns:
             Agent manifest dictionary, or None if not found.
+
+        Raises:
+            ValueError: If the name would resolve outside agents_dir.
         """
-        manifest_path = self.agents_dir / name / "manifest.yaml"
+        manifest_path = agent_path(self.agents_dir, name) / "manifest.yaml"
         if not manifest_path.exists():
             return None
 
@@ -128,12 +141,14 @@ class FleetManager:
         Returns:
             Number of agents that received the broadcast.
         """
-        agents = self.list_agents(state_filter=state_filter)
         count = 0
 
-        for agent in agents:
-            name = agent["name"]
-            updates_path = self.agents_dir / name / "updates.yaml"
+        for agent_dir, _ in self._iter_agents(state_filter=state_filter):
+            # Write by directory, never by the manifest's (untrusted) 'name'
+            try:
+                updates_path = agent_path(self.agents_dir, agent_dir.name) / "updates.yaml"
+            except ValueError:
+                continue  # e.g. a symlink pointing outside agents_dir
 
             updates: List[Dict[str, Any]] = []
             if updates_path.exists():

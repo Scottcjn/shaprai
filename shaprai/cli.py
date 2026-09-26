@@ -25,6 +25,7 @@ from shaprai.a11y import (
 from shaprai.core.fleet_manager import FleetManager
 from shaprai.core.lifecycle import (
     AgentState,
+    agent_path,
     check_path_component,
     create_agent,
     deploy_agent,
@@ -42,12 +43,72 @@ TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 
 
 def _path_safe_name(ctx: click.Context, param: click.Parameter, value: str) -> str:
-    """Click callback: a name must not resolve outside its directory."""
+    """Click callback: a name must be a single plain path component."""
     try:
         check_path_component(value)
     except ValueError as e:
         raise click.BadParameter(str(e), ctx=ctx, param=param)
     return value
+
+
+def _agent_name(ctx: click.Context, param: click.Parameter, value: str) -> str:
+    """Click callback: an agent name must stay inside AGENTS_DIR (symlinks too)."""
+    try:
+        agent_path(AGENTS_DIR, value)
+    except ValueError as e:
+        raise click.BadParameter(str(e), ctx=ctx, param=param)
+    return value
+
+
+def _new_agent_name(ctx: click.Context, param: click.Parameter, value: str) -> str:
+    """Click callback for `create`: a valid name that is not already taken."""
+    try:
+        validate_agent_name(value)
+        path = agent_path(AGENTS_DIR, value)
+    except ValueError as e:
+        raise click.BadParameter(str(e), ctx=ctx, param=param)
+    if path.exists() or path.is_symlink():
+        raise click.BadParameter(
+            f"Agent '{value}' already exists. Run 'shaprai evaluate {value}' "
+            "or choose another name.",
+            ctx=ctx,
+            param=param,
+        )
+    return value
+
+
+_PREREQ_KEY = "shaprai.pending_prereq_check"
+
+
+def _run_pending_prereq_check(ctx: click.Context) -> None:
+    """Run the Elyan ecosystem check main() deferred, at most once."""
+    redirect = ctx.meta.pop(_PREREQ_KEY, None)
+    if redirect is None:
+        return
+    if redirect:
+        # Keep stdout clean where it carries protocol or JSON output
+        with contextlib.redirect_stdout(sys.stderr):
+            require_elyan_ecosystem()
+    else:
+        require_elyan_ecosystem()
+
+
+class _ShaprCommand(click.Command):
+    """Runs the deferred prerequisite check after its own arguments parse.
+
+    Click invokes a group's callback before it parses the subcommand's
+    arguments, so checking prerequisites in main() would probe the network
+    before an invalid NAME was reported. Leaf commands run it here instead.
+    """
+
+    def invoke(self, ctx: click.Context):
+        _run_pending_prereq_check(ctx)
+        return super().invoke(ctx)
+
+
+class _ShaprGroup(click.Group):
+    command_class = _ShaprCommand
+    group_class = type  # subgroups are _ShaprGroup too
 
 
 def _ensure_dirs() -> None:
@@ -56,7 +117,7 @@ def _ensure_dirs() -> None:
     AGENTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
-@click.group()
+@click.group(cls=_ShaprGroup)
 @click.version_option(version=__version__, prog_name="shaprai")
 @click.option(
     "--skip-checks",
@@ -91,12 +152,11 @@ def main(
     set_output_format(ctx, OutputFormat(output_format))
     _ensure_dirs()
     if not skip_checks:
-        # Keep stdout clean where it carries protocol or JSON output
-        if output_format == "json" or ctx.invoked_subcommand in ("mcp", "agent-card"):
-            with contextlib.redirect_stdout(sys.stderr):
-                require_elyan_ecosystem()
-        else:
-            require_elyan_ecosystem()
+        # Deferred to _ShaprCommand.invoke, so argument errors come first
+        ctx.meta[_PREREQ_KEY] = output_format == "json" or ctx.invoked_subcommand in (
+            "mcp",
+            "agent-card",
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -105,7 +165,7 @@ def main(
 
 
 @main.command()
-@click.argument("name", callback=_path_safe_name)
+@click.argument("name", callback=_new_agent_name)
 @click.option(
     "--template",
     "-t",
@@ -129,18 +189,8 @@ def create(name: str, template: str, model: Optional[str]) -> None:
     """
     from shaprai.elyan_bus import ElyanBus
 
-    # Before any template, filesystem or network work
-    try:
-        validate_agent_name(name)
-    except ValueError as e:
-        emit_error(str(e))
-        sys.exit(1)
-    if (AGENTS_DIR / name).exists():
-        emit_error(
-            f"Agent '{name}' already exists.",
-            hint=f"Run 'shaprai evaluate {name}' or choose another name.",
-        )
-        sys.exit(1)
+    # NAME was validated (and checked to be free) by _new_agent_name, before
+    # the prerequisite probes and any template, filesystem or network work.
 
     # Resolve template path
     template_path = TEMPLATES_DIR / f"{template}.yaml"
@@ -189,7 +239,7 @@ def create(name: str, template: str, model: Optional[str]) -> None:
 
 
 @main.command()
-@click.argument("name", callback=_path_safe_name)
+@click.argument("name", callback=_agent_name)
 @click.option(
     "--phase",
     "-p",
@@ -411,7 +461,7 @@ def generate_sft(template_path: str, output_path: str, count: int) -> None:
 
 
 @main.command()
-@click.argument("name", callback=_path_safe_name)
+@click.argument("name", callback=_agent_name)
 @click.option(
     "--teacher-endpoint",
     required=True,
@@ -550,7 +600,7 @@ def synthesize(
 
 
 @main.command()
-@click.argument("name", callback=_path_safe_name)
+@click.argument("name", callback=_agent_name)
 @click.option(
     "--platform",
     "-p",
@@ -587,7 +637,7 @@ def deploy(name: str, platform: str) -> None:
 
 
 @main.command()
-@click.argument("name", callback=_path_safe_name)
+@click.argument("name", callback=_agent_name)
 def evaluate(name: str) -> None:
     """Evaluate an agent against the Elyan-class quality gate using PSE markers."""
     agent_dir = AGENTS_DIR / name
@@ -624,7 +674,7 @@ def evaluate(name: str) -> None:
 
 
 @main.command()
-@click.argument("name", callback=_path_safe_name)
+@click.argument("name", callback=_agent_name)
 def graduate(name: str) -> None:
     """Attempt to graduate an agent from the Sanctuary.
 
@@ -656,7 +706,7 @@ def graduate(name: str) -> None:
 
 
 @main.command()
-@click.argument("name", callback=_path_safe_name)
+@click.argument("name", callback=_agent_name)
 @click.option(
     "--lesson",
     "-l",
@@ -708,7 +758,7 @@ def sanctuary(name: str, lesson: Optional[str]) -> None:
 
 
 @main.command()
-@click.argument("name", callback=_path_safe_name)
+@click.argument("name", callback=_agent_name)
 @click.option(
     "--transport",
     type=click.Choice(["stdio", "streamable-http"]),
@@ -760,7 +810,7 @@ def mcp(name: str, transport: str, host: str, port: int, allow_engage: bool) -> 
 
 
 @main.command("agent-card")
-@click.argument("name", callback=_path_safe_name)
+@click.argument("name", callback=_agent_name)
 @click.option(
     "--url", required=True, help="Endpoint where the agent serves A2A requests."
 )

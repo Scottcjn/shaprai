@@ -35,22 +35,48 @@ class AgentState(Enum):
 
 
 # New agent names: one path component that is also safe in wallet IDs and URLs
-AGENT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+AGENT_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 
 
 def check_path_component(name: str) -> None:
-    """Reject names that would resolve outside the agents directory."""
+    """Reject names that are not a single, plain path component.
+
+    This is a lexical check (no filesystem access): it rejects separators,
+    '.'/'..', NUL, and ':' (which would make a drive-relative path such as
+    'D:planted' on Windows). It deliberately allows the looser names older
+    versions created, so existing agents still load. Use agent_path() to
+    also refuse a component that resolves outside its directory via a
+    symlink.
+    """
     if (
         not isinstance(name, str)
         or not name
         or name in (".", "..")
         or "/" in name
         or "\\" in name
+        or ":" in name
         or "\x00" in name
     ):
         raise ValueError(
             f"Invalid name {name!r}: must be a single path component, not a path"
         )
+
+
+def agent_path(agents_dir: Path, name: str) -> Path:
+    """Return agents_dir / name, refusing anything that lands outside it.
+
+    Applies check_path_component(), then resolves symlinks and requires the
+    result to sit directly inside the resolved agents directory, so a symlink
+    planted at agents_dir/<name> cannot point reads or writes elsewhere.
+
+    Raises:
+        ValueError: If the name is not allowed or resolves outside agents_dir.
+    """
+    check_path_component(name)
+    path = agents_dir / name
+    if path.resolve().parent != agents_dir.resolve():
+        raise ValueError(f"Invalid name {name!r}: resolves outside {agents_dir}")
+    return path
 
 
 def validate_agent_name(name: str) -> None:
@@ -64,7 +90,7 @@ def validate_agent_name(name: str) -> None:
         ValueError: If the name is not allowed.
     """
     check_path_component(name)
-    if not AGENT_NAME_PATTERN.match(name):
+    if not AGENT_NAME_PATTERN.fullmatch(name):
         raise ValueError(
             f"Invalid agent name {name!r}: use 1-64 letters, digits, '.', '_' "
             "or '-', starting with a letter or digit"
@@ -97,7 +123,7 @@ def create_agent(
     if agents_dir is None:
         agents_dir = Path.home() / ".shaprai" / "agents"
 
-    agent_dir = agents_dir / name
+    agent_dir = agent_path(agents_dir, name)
     if agent_dir.exists():
         raise FileExistsError(f"Agent '{name}' already exists at {agent_dir}")
 
@@ -132,8 +158,7 @@ def create_agent(
 
 def _load_manifest(name: str, agents_dir: Path) -> Dict[str, Any]:
     """Load an agent's manifest from disk."""
-    check_path_component(name)
-    manifest_path = agents_dir / name / "manifest.yaml"
+    manifest_path = agent_path(agents_dir, name) / "manifest.yaml"
     if not manifest_path.exists():
         raise FileNotFoundError(f"Agent '{name}' not found at {agents_dir / name}")
     with open(manifest_path, "r") as f:
@@ -142,9 +167,8 @@ def _load_manifest(name: str, agents_dir: Path) -> Dict[str, Any]:
 
 def _save_manifest(name: str, manifest: Dict[str, Any], agents_dir: Path) -> None:
     """Save an agent's manifest to disk."""
-    check_path_component(name)
+    manifest_path = agent_path(agents_dir, name) / "manifest.yaml"
     manifest["updated_at"] = time.time()
-    manifest_path = agents_dir / name / "manifest.yaml"
     with open(manifest_path, "w") as f:
         yaml.dump(manifest, f, default_flow_style=False, sort_keys=False)
 
