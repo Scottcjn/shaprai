@@ -13,11 +13,29 @@ RATE_CLAIM = re.compile(
 )
 
 
+SKIP_DIRS = {".git", ".venv", "venv", "node_modules", "build", "dist", "tests"}
+
+
+def _tracked(pattern):
+    for path in ROOT.rglob(pattern):
+        rel = path.relative_to(ROOT).parts
+        if not any(part in SKIP_DIRS or part.startswith(".") for part in rel[:-1]):
+            yield path
+
+
 def shipped_files():
+    """Everything a user or another model may read as documentation or code."""
     yield from (ROOT / "shaprai").rglob("*.py")
-    yield from ROOT.glob("*.md")
-    yield from (ROOT / "docs").rglob("*.md")
-    yield ROOT / "llms.txt"
+    for pattern in ("*.md", "*.txt", "*.yaml", "*.yml"):
+        yield from _tracked(pattern)
+
+
+def test_scan_covers_nested_docs():
+    scanned = {p.relative_to(ROOT).as_posix() for p in shipped_files()}
+    assert "llms.txt" in scanned
+    for doc in ("shaprai/marketplace/README.md", "tutorials/cli-walkthrough.md"):
+        if (ROOT / doc).exists():
+            assert doc in scanned
 
 
 def test_no_rtc_exchange_rate_claims():
