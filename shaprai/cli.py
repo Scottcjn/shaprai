@@ -25,9 +25,11 @@ from shaprai.a11y import (
 from shaprai.core.fleet_manager import FleetManager
 from shaprai.core.lifecycle import (
     AgentState,
+    check_path_component,
     create_agent,
     deploy_agent,
     get_agent_status,
+    validate_agent_name,
 )
 from shaprai.core.template_engine import fork_template, list_templates, load_template
 from shaprai.prerequisites import require_elyan_ecosystem
@@ -37,6 +39,15 @@ from shaprai.sanctuary.quality_gate import ELYAN_CLASS_THRESHOLD, QualityGate
 SHAPRAI_HOME = Path.home() / ".shaprai"
 AGENTS_DIR = SHAPRAI_HOME / "agents"
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
+
+
+def _path_safe_name(ctx: click.Context, param: click.Parameter, value: str) -> str:
+    """Click callback: a name must not resolve outside its directory."""
+    try:
+        check_path_component(value)
+    except ValueError as e:
+        raise click.BadParameter(str(e), ctx=ctx, param=param)
+    return value
 
 
 def _ensure_dirs() -> None:
@@ -94,7 +105,7 @@ def main(
 
 
 @main.command()
-@click.argument("name")
+@click.argument("name", callback=_path_safe_name)
 @click.option(
     "--template",
     "-t",
@@ -117,6 +128,19 @@ def create(name: str, template: str, model: Optional[str]) -> None:
     - Grazer platform binding (engagement)
     """
     from shaprai.elyan_bus import ElyanBus
+
+    # Before any template, filesystem or network work
+    try:
+        validate_agent_name(name)
+    except ValueError as e:
+        emit_error(str(e))
+        sys.exit(1)
+    if (AGENTS_DIR / name).exists():
+        emit_error(
+            f"Agent '{name}' already exists.",
+            hint=f"Run 'shaprai evaluate {name}' or choose another name.",
+        )
+        sys.exit(1)
 
     # Resolve template path
     template_path = TEMPLATES_DIR / f"{template}.yaml"
@@ -165,7 +189,7 @@ def create(name: str, template: str, model: Optional[str]) -> None:
 
 
 @main.command()
-@click.argument("name")
+@click.argument("name", callback=_path_safe_name)
 @click.option(
     "--phase",
     "-p",
@@ -387,7 +411,7 @@ def generate_sft(template_path: str, output_path: str, count: int) -> None:
 
 
 @main.command()
-@click.argument("name")
+@click.argument("name", callback=_path_safe_name)
 @click.option(
     "--teacher-endpoint",
     required=True,
@@ -526,7 +550,7 @@ def synthesize(
 
 
 @main.command()
-@click.argument("name")
+@click.argument("name", callback=_path_safe_name)
 @click.option(
     "--platform",
     "-p",
@@ -563,7 +587,7 @@ def deploy(name: str, platform: str) -> None:
 
 
 @main.command()
-@click.argument("name")
+@click.argument("name", callback=_path_safe_name)
 def evaluate(name: str) -> None:
     """Evaluate an agent against the Elyan-class quality gate using PSE markers."""
     agent_dir = AGENTS_DIR / name
@@ -600,7 +624,7 @@ def evaluate(name: str) -> None:
 
 
 @main.command()
-@click.argument("name")
+@click.argument("name", callback=_path_safe_name)
 def graduate(name: str) -> None:
     """Attempt to graduate an agent from the Sanctuary.
 
@@ -632,7 +656,7 @@ def graduate(name: str) -> None:
 
 
 @main.command()
-@click.argument("name")
+@click.argument("name", callback=_path_safe_name)
 @click.option(
     "--lesson",
     "-l",
@@ -684,7 +708,7 @@ def sanctuary(name: str, lesson: Optional[str]) -> None:
 
 
 @main.command()
-@click.argument("name")
+@click.argument("name", callback=_path_safe_name)
 @click.option(
     "--transport",
     type=click.Choice(["stdio", "streamable-http"]),
@@ -736,7 +760,7 @@ def mcp(name: str, transport: str, host: str, port: int, allow_engage: bool) -> 
 
 
 @main.command("agent-card")
-@click.argument("name")
+@click.argument("name", callback=_path_safe_name)
 @click.option(
     "--url", required=True, help="Endpoint where the agent serves A2A requests."
 )
@@ -842,7 +866,7 @@ def template_list() -> None:
 
 
 @template.command("create")
-@click.argument("name")
+@click.argument("name", callback=_path_safe_name)
 @click.option(
     "--model",
     "-m",

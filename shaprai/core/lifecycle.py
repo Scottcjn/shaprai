@@ -11,6 +11,7 @@ Lifecycle: CREATED -> TRAINING -> SANCTUARY -> GRADUATED -> DEPLOYED -> RETIRED
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import asdict
 from enum import Enum
@@ -33,6 +34,43 @@ class AgentState(Enum):
     RETIRED = "retired"
 
 
+# New agent names: one path component that is also safe in wallet IDs and URLs
+AGENT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+
+def check_path_component(name: str) -> None:
+    """Reject names that would resolve outside the agents directory."""
+    if (
+        not isinstance(name, str)
+        or not name
+        or name in (".", "..")
+        or "/" in name
+        or "\\" in name
+        or "\x00" in name
+    ):
+        raise ValueError(
+            f"Invalid name {name!r}: must be a single path component, not a path"
+        )
+
+
+def validate_agent_name(name: str) -> None:
+    """Validate a name for a new agent.
+
+    Names become a directory under the agents directory and part of the
+    agent's wallet and Beacon IDs, so they are restricted to 1-64 letters,
+    digits, '.', '_' and '-', starting with a letter or digit.
+
+    Raises:
+        ValueError: If the name is not allowed.
+    """
+    check_path_component(name)
+    if not AGENT_NAME_PATTERN.match(name):
+        raise ValueError(
+            f"Invalid agent name {name!r}: use 1-64 letters, digits, '.', '_' "
+            "or '-', starting with a letter or digit"
+        )
+
+
 def create_agent(
     name: str,
     template: AgentTemplate,
@@ -53,7 +91,9 @@ def create_agent(
 
     Raises:
         FileExistsError: If an agent with this name already exists.
+        ValueError: If the name is not a valid agent name.
     """
+    validate_agent_name(name)
     if agents_dir is None:
         agents_dir = Path.home() / ".shaprai" / "agents"
 
@@ -92,6 +132,7 @@ def create_agent(
 
 def _load_manifest(name: str, agents_dir: Path) -> Dict[str, Any]:
     """Load an agent's manifest from disk."""
+    check_path_component(name)
     manifest_path = agents_dir / name / "manifest.yaml"
     if not manifest_path.exists():
         raise FileNotFoundError(f"Agent '{name}' not found at {agents_dir / name}")
@@ -101,6 +142,7 @@ def _load_manifest(name: str, agents_dir: Path) -> Dict[str, Any]:
 
 def _save_manifest(name: str, manifest: Dict[str, Any], agents_dir: Path) -> None:
     """Save an agent's manifest to disk."""
+    check_path_component(name)
     manifest["updated_at"] = time.time()
     manifest_path = agents_dir / name / "manifest.yaml"
     with open(manifest_path, "w") as f:
