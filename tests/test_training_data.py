@@ -148,6 +148,13 @@ class TestFilters:
         ]
 
 
+_FIXTURE_CORPUS = "fixtures" in SEED_SFT_PATH.parts
+
+
+@pytest.mark.skipif(
+    _FIXTURE_CORPUS,
+    reason="corpus-quality checks need the real seed corpus (set SHAPRAI_SEED_DIR)",
+)
 class TestSeedCorpus:
     def test_seed_files_ship_with_package(self):
         assert SEED_SFT_PATH.exists() and SEED_PAIRS_PATH.exists()
@@ -273,3 +280,12 @@ def corpus_failure_modes():
 
 def test_contamination_threshold_constant():
     assert 0 < corpus.CONTAMINATION_THRESHOLD < 1
+
+
+def test_missing_seed_corpus_loads_as_empty(tmp_path, monkeypatch):
+    from shaprai.training import corpus
+
+    monkeypatch.setattr(corpus, "SEED_SFT_PATH", tmp_path / "none" / "seed_sft.jsonl")
+    monkeypatch.setattr(corpus, "SEED_PAIRS_PATH", tmp_path / "none" / "seed_pairs.jsonl")
+    assert corpus.load_seed_sft(MANIFEST) == []
+    assert corpus.load_seed_pairs(MANIFEST) == []

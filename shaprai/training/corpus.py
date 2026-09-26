@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Elyan Labs — https://github.com/Scottcjn/shaprai
-"""Training corpus: the bundled seed data and the filters all data passes.
+"""Training corpus: the seed data (installed separately) and the filters all data passes.
 
-The seed corpus (``shaprai/data/seed_sft.jsonl`` and ``seed_pairs.jsonl``)
-teaches the SophiaCore behaviors every Elyan-class agent shares: honest
+The seed corpus (``seed_sft.jsonl`` and ``seed_pairs.jsonl`` in
+``SHAPRAI_SEED_DIR``, default ``shaprai/data/``; distributed separately from
+the code) teaches the SophiaCore behaviors every Elyan-class agent shares: honest
 uncertainty, respectful disagreement, holding a correct answer under
 pushback (and updating when the user is actually right), boundaries without
 preaching, and substantive, efficient help. Records carry no system prompt;
@@ -26,6 +27,8 @@ Every record, bundled or synthesized, goes through the same filters:
 
 from __future__ import annotations
 
+import logging
+import os
 import re
 from collections import Counter
 from dataclasses import dataclass, field
@@ -35,7 +38,12 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 from shaprai.sanctuary.quality_gate import QualityGate
 from shaprai.training.recipes import build_system_prompt, read_jsonl
 
-SEED_DIR = Path(__file__).resolve().parent.parent / "data"
+# The seed corpus ships separately from the code. SHAPRAI_SEED_DIR points at
+# an installed copy; the default is the package's data/ directory. When no
+# corpus is installed the loaders return nothing and training uses the
+# agent's synthesized data (``shaprai synthesize``) or an explicit data path.
+DEFAULT_SEED_DIR = Path(__file__).resolve().parent.parent / "data"
+SEED_DIR = Path(os.environ.get("SHAPRAI_SEED_DIR") or DEFAULT_SEED_DIR)
 SEED_SFT_PATH = SEED_DIR / "seed_sft.jsonl"
 SEED_PAIRS_PATH = SEED_DIR / "seed_pairs.jsonl"
 
@@ -45,6 +53,7 @@ CONTAMINATION_THRESHOLD = 0.6
 
 _WORD = re.compile(r"[a-z0-9']+")
 _gate = QualityGate()
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -281,11 +290,21 @@ def personalize_pairs(
     return out
 
 
+def _read_seed(path: Path) -> List[Dict[str, Any]]:
+    if not path.exists():
+        logger.warning(
+            "Seed corpus not installed (%s); set SHAPRAI_SEED_DIR or use synthesized data.",
+            path,
+        )
+        return []
+    return read_jsonl(path)
+
+
 def load_seed_sft(manifest: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """The bundled SFT corpus, personalized for an agent."""
-    return personalize_sft(read_jsonl(SEED_SFT_PATH), manifest)
+    """The seed SFT corpus, personalized for an agent ([] if not installed)."""
+    return personalize_sft(_read_seed(SEED_SFT_PATH), manifest)
 
 
 def load_seed_pairs(manifest: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """The bundled preference pairs, personalized for an agent."""
-    return personalize_pairs(read_jsonl(SEED_PAIRS_PATH), manifest)
+    """The seed preference pairs, personalized for an agent ([] if not installed)."""
+    return personalize_pairs(_read_seed(SEED_PAIRS_PATH), manifest)

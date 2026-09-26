@@ -82,7 +82,7 @@ vllm serve Qwen/Qwen3-8B --enable-lora \
 shaprai train my-agent --phase driftlock --endpoint http://localhost:8000/v1
 ```
 
-Without `--data`, training uses the bundled seed corpus (hundreds of curated SFT conversations and length-matched preference pairs covering honesty, anti-sycophancy, integrity and substantive help), personalized with the agent's persona. To add persona-specific data distilled from any teacher model:
+Without `--data`, training uses the seed corpus (curated SFT conversations and length-matched preference pairs covering honesty, anti-sycophancy, integrity and substantive help) if one is installed. The corpus is distributed separately from the code: put `seed_sft.jsonl` and `seed_pairs.jsonl` in `shaprai/data/` or point `SHAPRAI_SEED_DIR` at them. It is personalized with the agent's persona. With no corpus installed, training uses the agent's synthesized data. To add persona-specific data distilled from any teacher model:
 
 ```bash
 shaprai synthesize my-agent --teacher-endpoint https://api.example.com/v1 --teacher-model <model> --count 300

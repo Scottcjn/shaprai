@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Elyan Labs — https://github.com/Scottcjn/shaprai
 """Persona-specific training data distilled from a teacher model.
 
-The bundled seed corpus teaches behaviors every Elyan-class agent shares;
+The seed corpus teaches behaviors every Elyan-class agent shares;
 this module grows data specific to one agent's persona and capabilities,
 using any teacher reachable as a ``ChatFn`` (an OpenAI-compatible endpoint).
 

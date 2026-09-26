@@ -71,7 +71,7 @@ Phase 'sft' complete for 'my-agent'.
   Train loss:  ...
 ```
 
-Without `--data`, training uses the bundled seed corpus, personalized with your agent's persona. To grow persona-specific data, distill it from a stronger teacher model behind any OpenAI-compatible API:
+Without `--data`, training uses the seed corpus if one is installed (it ships separately; see `SHAPRAI_SEED_DIR` in the README), personalized with your agent's persona. To grow persona-specific data, distill it from a stronger teacher model behind any OpenAI-compatible API:
 
 ```bash
 $ shaprai synthesize my-agent --teacher-endpoint https://api.example.com/v1 --teacher-model <model> --count 300

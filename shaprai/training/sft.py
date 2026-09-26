@@ -101,7 +101,7 @@ class SFTTrainer(ManifestPhase):
     def _prepare_dataset(self, data_path: Optional[str] = None) -> Path:
         """Prepare the SFT dataset.
 
-        If no data_path is provided, combines the bundled seed corpus with
+        If no data_path is provided, combines the seed corpus (if installed) with
         any data synthesized for this agent (``data/synth_sft.jsonl``, see
         ``shaprai synthesize``), personalized with the agent's system prompt.
 
@@ -122,6 +122,12 @@ class SFTTrainer(ManifestPhase):
         synthesized = read_jsonl(synth_path) if synth_path.exists() else []
 
         dataset_path = self.agent_dir / "data" / "sft_train.jsonl"
+        if not records and not synthesized:
+            raise ValueError(
+                "No training data: no seed corpus is installed (SHAPRAI_SEED_DIR) and "
+                "this agent has no synthesized SFT examples. Run `shaprai synthesize` or "
+                "pass an explicit data path."
+            )
         write_jsonl(dataset_path, records + synthesized)
 
         logger.info(

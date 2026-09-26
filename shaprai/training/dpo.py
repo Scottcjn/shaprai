@@ -302,7 +302,7 @@ class DPOTrainer(ManifestPhase):
     def _prepare_pairs(self, pairs_path: Optional[str] = None) -> Path:
         """Prepare preference training pairs.
 
-        If no pairs_path is provided, combines the bundled seed pairs with
+        If no pairs_path is provided, combines the seed pairs (if installed) with
         any pairs synthesized for this agent (``data/synth_pairs.jsonl``).
 
         Args:
@@ -321,6 +321,12 @@ class DPOTrainer(ManifestPhase):
         synthesized = read_jsonl(synth_path) if synth_path.exists() else []
 
         dataset_path = self.agent_dir / "data" / "dpo_pairs.jsonl"
+        if not pairs and not synthesized:
+            raise ValueError(
+                "No training data: no seed corpus is installed (SHAPRAI_SEED_DIR) and "
+                "this agent has no synthesized preference pairs. Run `shaprai synthesize` or "
+                "pass an explicit data path."
+            )
         write_jsonl(dataset_path, pairs + synthesized)
 
         logger.info(

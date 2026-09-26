@@ -290,3 +290,33 @@ class TestPreference:
     def test_missing_pairs_path_raises(self, agent_dir):
         with pytest.raises(FileNotFoundError):
             DPOTrainer(agent_dir).train(pairs_path="nope.jsonl", dry_run=True)
+
+
+def _no_seed_corpus(monkeypatch, tmp_path):
+    from shaprai.training import corpus
+
+    monkeypatch.setattr(corpus, "SEED_SFT_PATH", tmp_path / "none" / "seed_sft.jsonl")
+    monkeypatch.setattr(corpus, "SEED_PAIRS_PATH", tmp_path / "none" / "seed_pairs.jsonl")
+
+
+def test_sft_without_any_data_fails_clearly(agent_dir, monkeypatch, tmp_path):
+    _no_seed_corpus(monkeypatch, tmp_path)
+    with pytest.raises(ValueError, match="No training data"):
+        SFTTrainer(agent_dir).train(dry_run=True)
+
+
+def test_dpo_without_any_data_fails_clearly(agent_dir, monkeypatch, tmp_path):
+    _no_seed_corpus(monkeypatch, tmp_path)
+    with pytest.raises(ValueError, match="No training data"):
+        DPOTrainer(agent_dir).train(dry_run=True)
+
+
+def test_sft_without_corpus_uses_synthesized_data(agent_dir, monkeypatch, tmp_path):
+    _no_seed_corpus(monkeypatch, tmp_path)
+    synth = agent_dir / "data" / "synth_sft.jsonl"
+    synth.parent.mkdir(parents=True, exist_ok=True)
+    synth.write_text(
+        '{"messages": [{"role": "user", "content": "hi"}, '
+        '{"role": "assistant", "content": "hello"}]}\n'
+    )
+    assert SFTTrainer(agent_dir).train(dry_run=True)["num_examples"] == 1

@@ -376,7 +376,7 @@ def generate_sft(template_path: str, output_path: str, count: int) -> None:
     if unique < count:
         click.echo(
             "Note: the template pool repeats examples (identity is upsampled). For diverse "
-            "data, train on the bundled seed corpus or run 'shaprai synthesize'."
+            "data, install the seed corpus (SHAPRAI_SEED_DIR) or run 'shaprai synthesize'."
         )
 
 
