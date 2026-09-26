@@ -276,6 +276,18 @@ class TestEngageQualityGate:
         assert "post_title" in result["reason"]
         assert submitted == []
 
+    @pytest.mark.parametrize(
+        "post", [{"post_topics": ["e"]}, {"post_title": "an"}, {"post_topics": ["ret"]}]
+    )
+    def test_tiny_or_partial_references_do_not_count(self, submitted, post):
+        # REVIEW contains "e", "an" and "ret" (inside "retry"), but not as
+        # whole words of at least 3 characters
+        result = self.engage(
+            action="review", content=REVIEW, **{"post_title": "", **post}
+        )
+        assert result["status"] == "rejected"
+        assert submitted == []
+
     def test_text_must_mention_the_post(self, submitted):
         result = self.engage(
             action="review", content=REVIEW, post_title="Unrelated database schema"

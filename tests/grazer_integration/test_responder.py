@@ -154,6 +154,12 @@ class TestGrazerResponder:
         )
         assert responder._score_response(text, post) < 0.8
 
+    def test_reference_must_be_a_whole_word(self, responder: GrazerResponder) -> None:
+        text = " ".join(f"word{i}" for i in range(60))
+        for topic, expected in (("word1", 1.0), ("ord1", 0.7), ("w", 0.7)):
+            post = DiscoveredPost("1", "", "", "", "", "u", [topic], 0.0)
+            assert responder._score_response(text, post) == pytest.approx(expected)
+
     def test_empty_post_fields_are_not_a_reference(
         self, responder: GrazerResponder
     ) -> None:

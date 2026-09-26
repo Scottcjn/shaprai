@@ -58,8 +58,8 @@ Python 3.10-3.14 is supported (CrewAI itself does not support 3.14 yet).
 - Agents created before 0.2 may name `Qwen/Qwen3-7B-Instruct` in `~/.shaprai/agents/<name>/manifest.yaml`. That model does not exist; change `model.base` to `Qwen/Qwen3-8B`.
 - `MCPAgent.get_tools_schema()` now returns MCP tool definitions (`inputSchema`); pass `format="openai"` for the function-calling shape.
 - `grazer_engage`, which posts publicly as the agent, is left out by default: `shaprai mcp` needs `--allow-engage` (for a graduated agent), `to_mcp_server()` needs `allow_publishing=True`, `get_tools_schema()` needs `include_publishing=True` and `execute_tool()` needs `allow_publishing=True`. These keep it away from models and MCP clients by default. They are not an authorization boundary for code you run, and the graduation check reads the local manifest.
-- `grazer_engage` text is checked against a spam floor (length, distinct words, stock phrases, a mention of the post's `post_title`/`post_author`/`post_topics`), not for correctness; `claim` and `upvote` take no text; all engagements share a 10/hour limit per agent.
-- Evaluation endpoints get `SHAPRAI_API_KEY`; `OPENAI_API_KEY` is only sent to `https://api.openai.com`. `shaprai synthesize` sends a key only to the teacher (`--teacher-api-key-env`) unless `--rejected-api-key-env` is given.
+- `grazer_engage` text is checked against a spam floor (length, distinct words, stock phrases, a whole-word mention of the post's `post_title`/`post_author`/`post_topics`, each at least 3 characters), not for correctness; `claim` and `upvote` take no text; all engagements share a 10/hour limit per agent.
+- Evaluation endpoints get `SHAPRAI_API_KEY`; `OPENAI_API_KEY` is only sent to `https://api.openai.com`. `shaprai synthesize` sends a key only to the teacher (`SHAPRAI_API_KEY`, or the variable named by `--teacher-api-key-env`) unless `--rejected-api-key-env` is given; a named variable that isn't set is an error.
 
 ## Quickstart
 

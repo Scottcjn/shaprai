@@ -9,6 +9,7 @@ response adds genuine value and passes quality checks.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -28,6 +29,16 @@ BANNED_PHRASES = [
 
 # Below this share of distinct words, a reply is mostly repetition
 MIN_DISTINCT_WORD_RATIO = 0.4
+# Shorter title/author/topic strings ("e", "an") would match almost any text
+MIN_REFERENCE_CHARS = 3
+
+
+def _mentions(text_lower: str, ref: str) -> bool:
+    """True if ``ref`` appears in the text as whole words, not inside a word."""
+    ref = ref.strip().lower()
+    if len(ref) < MIN_REFERENCE_CHARS:
+        return False
+    return re.search(rf"(?<!\w){re.escape(ref)}(?!\w)", text_lower) is not None
 
 
 @dataclass
@@ -200,11 +211,10 @@ class GrazerResponder:
             score -= 0.5
 
         if self.config.require_specific_reference:
-            # Empty fields must not count as a match ("" is in every string)
+            # Whole-word matches of references of at least 3 characters, so
+            # empty or tiny fields ("", "e", "an") can't match any text
             references = [post.title, post.author, *post.topics]
-            has_reference = any(
-                ref.strip() and ref.strip().lower() in text_lower for ref in references
-            )
+            has_reference = any(_mentions(text_lower, ref) for ref in references)
             if not has_reference:
                 score -= 0.3
 

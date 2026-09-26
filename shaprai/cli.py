@@ -408,15 +408,15 @@ def generate_sft(template_path: str, output_path: str, count: int) -> None:
 )
 @click.option(
     "--teacher-api-key-env",
-    default="SHAPRAI_API_KEY",
-    show_default=True,
-    help="Environment variable holding the teacher endpoint's API key.",
+    default=None,
+    help="Environment variable holding the teacher endpoint's API key; it must "
+    "be set (default: SHAPRAI_API_KEY if set, OPENAI_API_KEY for api.openai.com).",
 )
 @click.option(
     "--rejected-api-key-env",
     default=None,
-    help="Environment variable holding the --rejected-endpoint API key "
-    "(default: send no key there, so the teacher's key never leaves its host).",
+    help="Environment variable holding the --rejected-endpoint API key; it must "
+    "be set (default: send no key there, so the teacher's key never leaves its host).",
 )
 @click.option(
     "--count",
@@ -437,7 +437,7 @@ def synthesize(
     teacher_model: str,
     rejected_endpoint: Optional[str],
     rejected_model: Optional[str],
-    teacher_api_key_env: str,
+    teacher_api_key_env: Optional[str],
     rejected_api_key_env: Optional[str],
     count: int,
     categories: tuple,
@@ -462,21 +462,29 @@ def synthesize(
         )
         sys.exit(1)
 
+    # A named key variable must be set: silently falling back to another key
+    # (or none) would send the wrong credentials.
+    for option, env_name in (
+        ("--teacher-api-key-env", teacher_api_key_env),
+        ("--rejected-api-key-env", rejected_api_key_env),
+    ):
+        if env_name and not os.environ.get(env_name):
+            emit_error(f"{option}: environment variable {env_name} is not set.")
+            sys.exit(1)
+
     manifest = get_agent_status(name, agents_dir=AGENTS_DIR)
     # Each endpoint gets only its own key
     teacher = openai_chat_fn(
         teacher_endpoint,
         teacher_model,
-        api_key=os.environ.get(teacher_api_key_env) or None,
+        api_key=os.environ[teacher_api_key_env] if teacher_api_key_env else None,
         temperature=0.8,
         max_tokens=1024,
     )
     rejected_fn = None
     if rejected_endpoint:
         base = rejected_model or (manifest.get("model") or {}).get("base", name)
-        rejected_key = (
-            os.environ.get(rejected_api_key_env, "") if rejected_api_key_env else ""
-        )
+        rejected_key = os.environ[rejected_api_key_env] if rejected_api_key_env else ""
         rejected_fn = openai_chat_fn(
             rejected_endpoint,
             base,

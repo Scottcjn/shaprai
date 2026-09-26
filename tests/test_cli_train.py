@@ -278,6 +278,37 @@ class TestSynthesizeCommand:
         assert auth["http://localhost:8000"] == "Bearer sk-teacher"
         assert auth["http://localhost:9000"] is None
 
+    @pytest.mark.parametrize(
+        "option", ["--teacher-api-key-env", "--rejected-api-key-env"]
+    )
+    def test_named_key_variable_must_be_set(self, agents_dir, monkeypatch, option):
+        monkeypatch.delenv("MISSING_KEY", raising=False)
+        monkeypatch.setenv("SHAPRAI_API_KEY", "sk-fallback")
+        result = run(
+            "synthesize", "sable", "--teacher-endpoint", ENDPOINT,
+            "--teacher-model", "teacher", "--rejected-endpoint", ENDPOINT,
+            option, "MISSING_KEY",
+        )  # fmt: skip
+        assert result.exit_code == 1
+        assert "MISSING_KEY is not set" in result.output
+
+    @responses.activate
+    def test_named_teacher_key_variable_is_used(self, agents_dir, monkeypatch):
+        monkeypatch.setenv("TEACHER_KEY", "sk-named")
+        monkeypatch.setenv("SHAPRAI_API_KEY", "sk-fallback")
+        responses.add_callback(
+            responses.POST, f"{ENDPOINT}/chat/completions", self.teacher
+        )
+        result = run(
+            "synthesize", "sable", "--teacher-endpoint", ENDPOINT,
+            "--teacher-model", "teacher", "--teacher-api-key-env", "TEACHER_KEY",
+            "--count", "1", "--category", "helpfulness",
+        )  # fmt: skip
+        assert result.exit_code == 0, result.output
+        assert {c.request.headers["Authorization"] for c in responses.calls} == {
+            "Bearer sk-named"
+        }
+
     def test_train_warns_about_synthesized_data(self, agents_dir):
         synth = agents_dir / "sable" / "data" / "synth_sft.jsonl"
         synth.parent.mkdir(parents=True, exist_ok=True)
