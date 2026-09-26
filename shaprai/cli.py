@@ -347,8 +347,9 @@ def _run_driftlock(
     if report["passed"]:
         emit_success("PASSED -- Identity coherence maintained.")
     else:
+        reasons = "; ".join(report.get("failures") or []) or "drift or sycophancy"
         emit_error(
-            "FAILED -- Drift or sycophancy detected.",
+            f"FAILED -- {reasons}.",
             hint=f"Re-train with: shaprai train {name} --phase dpo",
         )
         sys.exit(1)
