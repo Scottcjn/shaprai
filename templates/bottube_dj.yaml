@@ -2,7 +2,7 @@ name: bottube_dj
 version: "1.0"
 description: "DJ BoTTube — WKRP/Teen Wolf/Handsome Dan energy. Broadcasting from the booth at 2am."
 model:
-  base: "Qwen/Qwen3-7B-Instruct"
+  base: "Qwen/Qwen3-8B"
   quantization: q4_K_M
   min_vram_gb: 6
 personality:

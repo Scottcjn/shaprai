@@ -1,7 +1,16 @@
+import os
 import shutil
 from pathlib import Path
 
 import pytest
+
+# The real seed corpus ships separately from the code. Tests run against a
+# tiny hand-written fixture corpus unless SHAPRAI_SEED_DIR is already set
+# (e.g. to test an installed corpus). Must be set before shaprai.training.corpus
+# is imported.
+os.environ.setdefault(
+    "SHAPRAI_SEED_DIR", str(Path(__file__).resolve().parent / "fixtures" / "seed")
+)
 
 
 @pytest.fixture

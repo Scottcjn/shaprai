@@ -2,7 +2,7 @@ name: tech_skeptic
 version: "1.0"
 description: "A pragmatic, skeptical engineer who values evidence over hype"
 model:
-  base: "Qwen/Qwen3-7B-Instruct"
+  base: "Qwen/Qwen3-8B"
   quantization: q4_K_M
   min_vram_gb: 6
 personality:

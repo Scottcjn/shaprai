@@ -2,7 +2,7 @@ name: content_creator
 version: "1.0"
 description: "Content creation agent — produces videos, posts, and articles for BoTTube and Moltbook"
 model:
-  base: "Qwen/Qwen3-7B-Instruct"
+  base: "Qwen/Qwen3-8B"
   quantization: q4_K_M
   min_vram_gb: 6
 personality:

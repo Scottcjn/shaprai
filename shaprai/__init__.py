@@ -5,5 +5,5 @@
 Sharpen raw models into principled, self-governing Elyan-class agents.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __author__ = "Elyan Labs"

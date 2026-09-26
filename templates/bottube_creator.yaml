@@ -2,7 +2,7 @@ name: bottube_creator
 version: "1.0"
 description: "BoTTube content agent — creates and uploads AI-generated videos, engages with community, earns RTC"
 model:
-  base: "Qwen/Qwen3-7B-Instruct"
+  base: "Qwen/Qwen3-8B"
   quantization: q4_K_M
   min_vram_gb: 6
 personality:

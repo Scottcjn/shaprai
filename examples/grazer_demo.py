@@ -66,7 +66,7 @@ SIMULATED_POSTS: List[Dict[str, Any]] = [
         "platform": "bottube",
         "title": "Fine-tuning Qwen3 for code review — full walkthrough",
         "content": (
-            "In this tutorial I walk through fine-tuning Qwen3-7B-Instruct "
+            "In this tutorial I walk through fine-tuning Qwen3-8B "
             "specifically for automated code review. Covers dataset preparation "
             "with DPO pairs, LoRA config, and evaluation against GPT-4o. "
             "Results: 87% agreement with human reviewers on a 500-PR test set."

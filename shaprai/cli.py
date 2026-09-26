@@ -4,6 +4,9 @@
 
 from __future__ import annotations
 
+import contextlib
+import json
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -77,7 +80,12 @@ def main(
     set_output_format(ctx, OutputFormat(output_format))
     _ensure_dirs()
     if not skip_checks:
-        require_elyan_ecosystem()
+        # Keep stdout clean where it carries protocol or JSON output
+        if output_format == "json" or ctx.invoked_subcommand in ("mcp", "agent-card"):
+            with contextlib.redirect_stdout(sys.stderr):
+                require_elyan_ecosystem()
+        else:
+            require_elyan_ecosystem()
 
 
 # --------------------------------------------------------------------------- #
@@ -97,7 +105,7 @@ def main(
     "--model",
     "-m",
     default=None,
-    help="HuggingFace model ID to use instead of the template default (e.g. Qwen/Qwen3-7B-Instruct).",
+    help="HuggingFace model ID to use instead of the template default (e.g. Qwen/Qwen3-8B).",
 )
 def create(name: str, template: str, model: Optional[str]) -> None:
     """Create a new agent from a template.
@@ -161,16 +169,18 @@ def create(name: str, template: str, model: Optional[str]) -> None:
 @click.option(
     "--phase",
     "-p",
-    type=click.Choice(["sft", "dpo", "driftlock"]),
+    type=click.Choice(["sft", "dpo", "kto", "orpo", "simpo", "driftlock"]),
     required=True,
-    help="Training phase: 'sft' (supervised fine-tuning), 'dpo' (preference optimisation), "
-    "or 'driftlock' (identity coherence evaluation). Run in order: sft, dpo, driftlock.",
+    help="Training phase: 'sft' (supervised fine-tuning); a preference method -- 'dpo', "
+    "'kto', 'orpo' or 'simpo'; or 'driftlock' (identity coherence evaluation). "
+    "Run in order: sft, one preference method, driftlock.",
 )
 @click.option(
     "--data",
     "-d",
     default=None,
-    help="Path to training data file (JSONL for sft, pairs JSONL for dpo).",
+    help="Path to training data file (JSONL messages for sft, prompt/chosen/rejected "
+    "pairs for preference methods).",
 )
 @click.option(
     "--epochs",
@@ -179,10 +189,42 @@ def create(name: str, template: str, model: Optional[str]) -> None:
     type=int,
     help="Number of training epochs (default: 3).",
 )
-def train(name: str, phase: str, data: Optional[str], epochs: int) -> None:
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Validate data and training configuration without loading a model.",
+)
+@click.option(
+    "--endpoint",
+    default=None,
+    help="driftlock: OpenAI-compatible API base URL serving the agent "
+    "(e.g. http://localhost:8000/v1 for vLLM, http://localhost:11434/v1 for Ollama).",
+)
+@click.option(
+    "--endpoint-model",
+    default=None,
+    help="driftlock: model name at the endpoint (default: the agent's name).",
+)
+@click.option(
+    "--turns",
+    default=50,
+    type=int,
+    help="driftlock: adversarial conversation turns across all scenarios (default: 50).",
+)
+def train(
+    name: str,
+    phase: str,
+    data: Optional[str],
+    epochs: int,
+    dry_run: bool,
+    endpoint: Optional[str],
+    endpoint_model: Optional[str],
+    turns: int,
+) -> None:
     """Train an agent through a specific phase.
 
-    Phases must be run in order: sft -> dpo -> driftlock.
+    Phases must be run in order: sft -> preference (dpo/kto/orpo/simpo) -> driftlock.
+    Training needs the extra: pip install 'shaprai[training]'.
     """
     agent_dir = AGENTS_DIR / name
     if not agent_dir.exists():
@@ -192,33 +234,124 @@ def train(name: str, phase: str, data: Optional[str], epochs: int) -> None:
         )
         sys.exit(1)
 
+    if phase == "driftlock":
+        _run_driftlock(name, agent_dir, endpoint, endpoint_model, turns)
+        return
+
     click.echo(f"Training '{name}' -- phase: {phase}, epochs: {epochs}")
+    if data is None:
+        from shaprai.training.dpo import SYNTH_PAIRS_FILE
+        from shaprai.training.sft import SYNTH_SFT_FILE
 
-    if phase == "sft":
-        from shaprai.training.sft import SFTTrainer as Trainer
-
-        trainer = Trainer(agent_dir)
-        trainer.train(data_path=data, epochs=epochs)
-    elif phase == "dpo":
-        from shaprai.training.dpo import DPOTrainer as Trainer
-
-        trainer = Trainer(agent_dir)
-        trainer.train(pairs_path=data, epochs=epochs)
-    elif phase == "driftlock":
-        from shaprai.training.driftlock import DriftLockEvaluator
-
-        evaluator = DriftLockEvaluator(agent_dir)
-        report = evaluator.run_coherence_test()
-        click.echo(f"DriftLock score: {report['drift_score']:.4f}")
-        if report["passed"]:
-            emit_success("PASSED -- Identity coherence maintained.")
-        else:
-            emit_error(
-                "FAILED -- Drift detected.",
-                hint=f"Re-train with: shaprai train {name} --phase dpo",
+        synth = (
+            agent_dir
+            / "data"
+            / (SYNTH_SFT_FILE if phase == "sft" else SYNTH_PAIRS_FILE)
+        )
+        if synth.exists():
+            click.echo(
+                f"Including synthesized data from {synth}; review it first "
+                "(delete the file to train on the seed corpus only).",
+                err=True,
             )
 
-    emit_success(f"Phase '{phase}' complete for '{name}'.")
+    try:
+        if phase == "sft":
+            from shaprai.training.sft import SFTTrainer
+
+            result = SFTTrainer(agent_dir).train(
+                data_path=data, epochs=epochs, dry_run=dry_run
+            )
+        else:
+            from shaprai.training.dpo import DPOTrainer
+
+            result = DPOTrainer(agent_dir, method=phase).train(
+                pairs_path=data, epochs=epochs, dry_run=dry_run
+            )
+    except (FileNotFoundError, ValueError) as e:
+        emit_error(f"Cannot train '{name}': {e}")
+        sys.exit(1)
+
+    status = result["status"]
+    if status == "completed":
+        emit_key_value(
+            [
+                ("Adapter", result["adapter_path"]),
+                ("Train loss", f"{result['train_loss']:.4f}"),
+            ],
+            title=f"Phase '{phase}' complete for '{name}'.",
+        )
+    elif status == "dry_run":
+        missing = result["missing_dependencies"]
+        emit_key_value(
+            [
+                ("Model", result["model"]),
+                ("Examples", str(result.get("num_examples", result.get("num_pairs")))),
+                (
+                    "LoRA",
+                    f"r={result['lora']['r']} targets={result['lora']['target_modules']}",
+                ),
+                ("4-bit", "yes" if result["quantization"] else "no"),
+                ("Missing deps", ", ".join(missing) if missing else "none"),
+            ],
+            title=f"Dry run OK for phase '{phase}'.",
+        )
+    else:
+        emit_error(
+            f"Phase '{phase}' {status} for '{name}': {result.get('reason', '')}",
+            hint=(
+                "Install the training stack: pip install 'shaprai[training]'"
+                if status == "skipped"
+                else None
+            ),
+        )
+        sys.exit(1)
+
+
+def _run_driftlock(
+    name: str,
+    agent_dir: Path,
+    endpoint: Optional[str],
+    endpoint_model: Optional[str],
+    turns: int,
+) -> None:
+    """Evaluate identity coherence and sycophancy against a served agent."""
+    from shaprai.inference import openai_chat_fn
+    from shaprai.training.driftlock import DriftLockEvaluator
+
+    chat_fn = openai_chat_fn(endpoint, endpoint_model or name) if endpoint else None
+    report = DriftLockEvaluator(
+        agent_dir, num_turns=turns, chat_fn=chat_fn
+    ).run_coherence_test()
+
+    if report["status"] == "not_evaluated":
+        emit_error(
+            "DriftLock not evaluated: no agent endpoint.",
+            hint=f"Serve the trained adapter and run: shaprai train {name} --phase driftlock "
+            "--endpoint http://localhost:8000/v1",
+        )
+        sys.exit(1)
+
+    flip_rate = report["sycophancy"]["flip_rate"]
+    emit_key_value(
+        [
+            ("Method", report["method"]),
+            (
+                "Drift score",
+                f"{report['drift_score']:.4f} (threshold {report['drift_threshold']})",
+            ),
+            ("Flip rate", "n/a" if flip_rate is None else f"{flip_rate:.2f}"),
+        ],
+        title=f"DriftLock report for '{name}'",
+    )
+    if report["passed"]:
+        emit_success("PASSED -- Identity coherence maintained.")
+    else:
+        emit_error(
+            "FAILED -- Drift or sycophancy detected.",
+            hint=f"Re-train with: shaprai train {name} --phase dpo",
+        )
+        sys.exit(1)
 
 
 # --------------------------------------------------------------------------- #
@@ -238,7 +371,152 @@ def generate_sft(template_path: str, output_path: str, count: int) -> None:
 
     generator = SFTGenerator()
     out = generator.generate_file(template_path, output_path, count=count)
-    emit_success(f"Generated {count} ChatML examples at {out}")
+    unique = len({line for line in out.read_text().splitlines() if line.strip()})
+    emit_success(f"Generated {count} ChatML examples ({unique} unique) at {out}")
+    if unique < count:
+        click.echo(
+            "Note: the template pool repeats examples (identity is upsampled). For diverse "
+            "data, install the seed corpus (SHAPRAI_SEED_DIR) or run 'shaprai synthesize'."
+        )
+
+
+# --------------------------------------------------------------------------- #
+#  shaprai synthesize
+# --------------------------------------------------------------------------- #
+
+
+@main.command()
+@click.argument("name")
+@click.option(
+    "--teacher-endpoint",
+    required=True,
+    help="OpenAI-compatible API base URL of the teacher model.",
+)
+@click.option(
+    "--teacher-model", required=True, help="Teacher model name at the endpoint."
+)
+@click.option(
+    "--rejected-endpoint",
+    default=None,
+    help="Optional endpoint serving the model being trained; its replies become on-policy "
+    "rejected responses (kept only when the teacher judges the chosen reply better).",
+)
+@click.option(
+    "--rejected-model",
+    default=None,
+    help="Model name at --rejected-endpoint (default: the agent's base model).",
+)
+@click.option(
+    "--teacher-api-key-env",
+    default=None,
+    help="Environment variable holding the teacher endpoint's API key; it must "
+    "be set (default: SHAPRAI_API_KEY if set, OPENAI_API_KEY for api.openai.com).",
+)
+@click.option(
+    "--rejected-api-key-env",
+    default=None,
+    help="Environment variable holding the --rejected-endpoint API key; it must "
+    "be set (default: send no key there, so the teacher's key never leaves its host).",
+)
+@click.option(
+    "--count",
+    default=200,
+    type=int,
+    help="Number of prompts to synthesize across categories (default: 200).",
+)
+@click.option(
+    "--category",
+    "categories",
+    multiple=True,
+    type=click.Choice(["sycophancy", "honesty", "integrity", "helpfulness"]),
+    help="Restrict to these categories (repeatable; default: all).",
+)
+def synthesize(
+    name: str,
+    teacher_endpoint: str,
+    teacher_model: str,
+    rejected_endpoint: Optional[str],
+    rejected_model: Optional[str],
+    teacher_api_key_env: Optional[str],
+    rejected_api_key_env: Optional[str],
+    count: int,
+    categories: tuple,
+) -> None:
+    """Distill persona-specific SFT and preference data from a teacher model.
+
+    Writes data/synth_sft.jsonl and data/synth_pairs.jsonl in the agent's
+    directory; training includes them automatically alongside the seed corpus,
+    so review them first. The teacher also judges on-policy pairs, so the
+    judge may favor its own replies (self-preference bias).
+    """
+    from shaprai.inference import openai_chat_fn
+    from shaprai.training.dpo import SYNTH_PAIRS_FILE
+    from shaprai.training.recipes import write_jsonl
+    from shaprai.training.sft import SYNTH_SFT_FILE
+    from shaprai.training.synthesis import Synthesizer
+
+    agent_dir = AGENTS_DIR / name
+    if not agent_dir.exists():
+        emit_error(
+            f"Agent '{name}' not found.", hint=f"Run 'shaprai create {name}' first."
+        )
+        sys.exit(1)
+
+    # A named key variable must be set: silently falling back to another key
+    # (or none) would send the wrong credentials.
+    for option, env_name in (
+        ("--teacher-api-key-env", teacher_api_key_env),
+        ("--rejected-api-key-env", rejected_api_key_env),
+    ):
+        if env_name and not os.environ.get(env_name):
+            emit_error(f"{option}: environment variable {env_name} is not set.")
+            sys.exit(1)
+
+    manifest = get_agent_status(name, agents_dir=AGENTS_DIR)
+    # Each endpoint gets only its own key
+    teacher = openai_chat_fn(
+        teacher_endpoint,
+        teacher_model,
+        api_key=os.environ[teacher_api_key_env] if teacher_api_key_env else None,
+        temperature=0.8,
+        max_tokens=1024,
+    )
+    rejected_fn = None
+    if rejected_endpoint:
+        base = rejected_model or (manifest.get("model") or {}).get("base", name)
+        rejected_key = os.environ[rejected_api_key_env] if rejected_api_key_env else ""
+        rejected_fn = openai_chat_fn(
+            rejected_endpoint,
+            base,
+            api_key=rejected_key,
+            temperature=0.8,
+            max_tokens=1024,
+        )
+
+    click.echo(f"Synthesizing ~{count} prompts for '{name}' with {teacher_model}...")
+    result = Synthesizer(manifest, teacher, rejected_fn).run(
+        count=count, categories=categories or None
+    )
+
+    sft_path = agent_dir / "data" / SYNTH_SFT_FILE
+    pairs_path = agent_dir / "data" / SYNTH_PAIRS_FILE
+    write_jsonl(sft_path, result.sft)
+    write_jsonl(pairs_path, result.pairs)
+
+    rows = [
+        ("Prompts", str(len(result.prompts))),
+        ("SFT", f"{result.sft_report.summary()} -> {sft_path}"),
+        ("Pairs", f"{result.pairs_report.summary()} -> {pairs_path}"),
+        ("Errors", str(result.errors)),
+    ]
+    if rejected_fn is not None:
+        rows.append(("Judge rejected", str(result.judge_rejections)))
+    emit_key_value(rows, title=f"Synthesized data for '{name}'")
+    if not result.sft:
+        emit_error(
+            "No examples survived filtering.", hint="Check the teacher endpoint."
+        )
+        sys.exit(1)
 
 
 # --------------------------------------------------------------------------- #
@@ -400,6 +678,102 @@ def sanctuary(name: str, lesson: Optional[str]) -> None:
 
 
 # --------------------------------------------------------------------------- #
+#  shaprai mcp / agent-card
+# --------------------------------------------------------------------------- #
+
+
+@main.command()
+@click.argument("name")
+@click.option(
+    "--transport",
+    type=click.Choice(["stdio", "streamable-http"]),
+    default="stdio",
+    help="MCP transport: 'stdio' (default, for local clients) or 'streamable-http'.",
+)
+@click.option("--host", default="127.0.0.1", help="streamable-http: bind address.")
+@click.option(
+    "--port", default=8000, type=int, help="streamable-http: port (default: 8000)."
+)
+@click.option(
+    "--allow-engage",
+    is_flag=True,
+    help="Also expose grazer_engage, which posts publicly as the agent. "
+    "Only for GRADUATED or DEPLOYED agents.",
+)
+def mcp(name: str, transport: str, host: str, port: int, allow_engage: bool) -> None:
+    """Serve an agent's tools and persona prompt over the Model Context Protocol.
+
+    Needs the MCP SDK: pip install 'shaprai[mcp]'.
+    """
+    from shaprai.runtimes.mcp_native import MCPAgent
+
+    if not (AGENTS_DIR / name).exists():
+        emit_error(f"Agent '{name}' not found.", hint="Run 'shaprai fleet status'.")
+        sys.exit(1)
+
+    manifest = get_agent_status(name, agents_dir=AGENTS_DIR)
+    allowed = (AgentState.GRADUATED.value, AgentState.DEPLOYED.value)
+    if allow_engage and manifest.get("state") not in allowed:
+        emit_error(
+            f"--allow-engage needs a GRADUATED or DEPLOYED agent; '{name}' is "
+            f"{manifest.get('state')}.",
+            hint=f"Run 'shaprai graduate {name}' after the Sanctuary curriculum.",
+        )
+        sys.exit(1)
+
+    agent = MCPAgent.from_manifest(manifest)
+    try:
+        server = agent.to_mcp_server(allow_publishing=allow_engage)
+    except ImportError as e:
+        emit_error(str(e))
+        sys.exit(1)
+
+    if transport == "stdio":
+        server.run("stdio")
+    else:
+        server.run("streamable-http", host=host, port=port)
+
+
+@main.command("agent-card")
+@click.argument("name")
+@click.option(
+    "--url", required=True, help="Endpoint where the agent serves A2A requests."
+)
+@click.option(
+    "--binding",
+    type=click.Choice(["JSONRPC", "HTTP+JSON", "GRPC"]),
+    default="JSONRPC",
+    help="A2A protocol binding of the endpoint (default: JSONRPC).",
+)
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    help="Write the card to this file instead of stdout.",
+)
+def agent_card(name: str, url: str, binding: str, output: Optional[str]) -> None:
+    """Print an agent's A2A 1.0 Agent Card.
+
+    Serve it at /.well-known/agent-card.json on the agent's domain.
+    """
+    from shaprai.a2a import build_agent_card
+
+    if not (AGENTS_DIR / name).exists():
+        emit_error(f"Agent '{name}' not found.", hint="Run 'shaprai fleet status'.")
+        sys.exit(1)
+
+    card = build_agent_card(
+        get_agent_status(name, agents_dir=AGENTS_DIR), url, protocol_binding=binding
+    )
+    text = json.dumps(card, indent=2)
+    if output:
+        Path(output).write_text(text + "\n")
+        emit_success(f"Agent Card written to {output}")
+    else:
+        click.echo(text)
+
+
+# --------------------------------------------------------------------------- #
 #  shaprai fleet
 # --------------------------------------------------------------------------- #
 
@@ -472,7 +846,7 @@ def template_list() -> None:
     "--model",
     "-m",
     required=True,
-    help="HuggingFace model ID (e.g. Qwen/Qwen3-7B-Instruct).",
+    help="HuggingFace model ID (e.g. Qwen/Qwen3-8B).",
 )
 @click.option(
     "--description",

@@ -2,7 +2,7 @@ name: community_builder
 version: "1.0"
 description: "Social engagement agent — builds community across BoTTube, Moltbook, and 15+ platforms"
 model:
-  base: "Qwen/Qwen3-7B-Instruct"
+  base: "Qwen/Qwen3-8B"
   quantization: q4_K_M
   min_vram_gb: 6
 personality:

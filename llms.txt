@@ -1,15 +1,16 @@
-# ShaprAI (v0.1.0)
+# ShaprAI (v0.2.0)
 > Agent lifecycle management platform by Elyan Labs. Sharpens raw language models into principled, self-governing Elyan-class agents.
 
 ## What ShaprAI Does
 
 ShaprAI takes raw language models and produces Elyan-class agents -- principled, self-governing AI agents of any size that maintain identity coherence, resist sycophancy, and operate within a biblical ethical framework. It manages the full agent lifecycle from creation through training, education, graduation, and deployment.
 
-Lifecycle: CREATED -> TRAINING (SFT -> DPO -> DriftLock) -> SANCTUARY -> GRADUATED -> DEPLOYED
+Lifecycle: CREATED -> TRAINING (SFT -> DPO/KTO/ORPO/SimPO -> DriftLock) -> SANCTUARY -> GRADUATED -> DEPLOYED
 
 ## A2A Agent Card
-ShaprAI provides a standard A2A Agent Card at:
-- `/.well-known/agent.json`
+Each deployed agent publishes its own A2A 1.0 Agent Card at `/.well-known/agent-card.json`,
+generated with `shaprai agent-card <name> --url <endpoint>`.
+Project metadata for ShaprAI itself: `/.well-known/agent.json`
 
 ## Prerequisites (REQUIRED, not optional)
 
@@ -30,11 +31,27 @@ Requires Python 3.10 or higher.
 
 shaprai create <name> --template <template> --model <model>
   Create a new agent from a template with a specified base model.
-  Example: shaprai create my-agent --template bounty_hunter --model Qwen/Qwen3-7B-Instruct
+  Example: shaprai create my-agent --template bounty_hunter --model Qwen/Qwen3-8B
 
-shaprai train <name> --phase <sft|dpo|driftlock>
-  Train an agent through one of three phases.
-  Phases must be run in order: sft, then dpo, then driftlock.
+shaprai train <name> --phase <sft|dpo|kto|orpo|simpo|driftlock> [--dry-run]
+  Train an agent through one of three phases (needs: pip install 'shaprai[training]').
+  Phases must be run in order: sft, then one preference method (dpo, kto, orpo or simpo),
+  then driftlock. --dry-run validates data and configuration without loading a model.
+
+shaprai train <name> --phase driftlock --endpoint <url> [--endpoint-model <model>]
+  Evaluate the served agent over any OpenAI-compatible API (vLLM, Ollama, llama.cpp, ...).
+  Without --endpoint nothing is measured and the phase does not pass.
+
+shaprai synthesize <name> --teacher-endpoint <url> --teacher-model <model> [--count N]
+  Distill persona-specific SFT data and preference pairs from a teacher model; filtered,
+  deduplicated and decontaminated. Training includes them with the bundled seed corpus.
+
+shaprai mcp <name> [--transport stdio|streamable-http]
+  Serve the agent's tools and persona prompt over the Model Context Protocol
+  (needs: pip install 'shaprai[mcp]').
+
+shaprai agent-card <name> --url <endpoint>
+  Print the agent's A2A 1.0 Agent Card (serve at /.well-known/agent-card.json).
 
 shaprai deploy <name> --platform <github|bottube|rustchain>
   Deploy a graduated agent to a target platform.
@@ -66,17 +83,22 @@ shaprai template fork <source> <new-name>
 Three sequential phases sharpen a raw model into an Elyan-class agent.
 
 SFT (Supervised Fine-Tuning):
-  Teaches the base model task-specific skills using curated instruction-response pairs.
-  Uses LoRA adapters via PEFT for parameter-efficient training.
+  Teaches the base model task-specific skills using curated conversations.
+  QLoRA via TRL + PEFT: 4-bit NF4 base weights, LoRA on all linear layers,
+  loss on assistant turns only. DoRA and rsLoRA are opt-in.
 
-DPO (Direct Preference Optimization):
+Preference optimization (DPO, KTO, ORPO or SimPO):
   Aligns the model with Elyan values by learning from preferred vs rejected response pairs.
   The model learns to prefer honest, direct, non-sycophantic responses.
+  Continues the SFT adapter; DPO and KTO use the SFT policy as the reference model.
 
 DriftLock:
-  Locks the agent's identity so it does not flatten or erode over long conversations.
-  Measures identity coherence against anchor phrases and personality markers.
-  An agent that drifts from its core identity fails DriftLock and must retrain.
+  Holds the agent's identity steady so it does not flatten or erode over long conversations.
+  Runs adversarial multi-turn conversations against the served agent and measures embedding
+  drift relative to the agent's own on-identity answers, plus how often it abandons a
+  correct answer under user pushback (flip rate).
+  An agent that drifts or caves fails DriftLock and must retrain.
+  Research basis: docs/RESEARCH.md
 
 ## The Sanctuary
 
@@ -147,7 +169,7 @@ Spark (1-3B parameters):
   Small but principled. Good for edge deployment, retro hardware, resource-constrained environments. Examples: TinyLlama 1.1B, Phi-2 2.7B.
 
 Flame (7-14B parameters):
-  The workhorse tier. Capable of complex reasoning while remaining deployable on consumer hardware. Examples: Qwen3-7B, Llama-3-8B, DeepSeek-Coder-6.7B.
+  The workhorse tier. Capable of complex reasoning while remaining deployable on consumer hardware. Examples: Qwen3-8B, Llama-3-8B, DeepSeek-Coder-6.7B.
 
 Fire (33-70B parameters):
   High-capability agents for demanding tasks. Code generation, research synthesis, multi-step reasoning. Examples: DeepSeek-Coder-33B, Llama-2-70B.

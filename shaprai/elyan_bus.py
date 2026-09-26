@@ -282,17 +282,23 @@ class ElyanBus:
         agent = self._get_agent(agent_name)
         results = []
 
-        for platform in agent.grazer_platforms:
-            try:
-                # Use grazer Python API if available
-                from grazer import GrazerClient
+        try:
+            from grazer import GrazerClient
+        except ImportError:
+            logger.warning("grazer-skill Python package not available")
+            return []
 
-                client = GrazerClient()
-                items = client.discover(platform=platform, limit=limit)
-                results.extend(items)
-            except ImportError:
-                logger.warning("grazer-skill Python package not available")
-                break
+        client = GrazerClient()
+        for platform in agent.grazer_platforms:
+            # grazer-skill exposes one discover_<platform>() method per platform
+            discover = getattr(client, f"discover_{platform}", None)
+            if discover is None:
+                logger.warning("Grazer has no discovery support for '%s'", platform)
+                continue
+            try:
+                results.extend(discover(limit=limit))
+            except Exception as e:
+                logger.warning("Grazer discovery failed on '%s': %s", platform, e)
 
         return results[:limit]
 

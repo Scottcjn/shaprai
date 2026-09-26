@@ -9,6 +9,7 @@ response adds genuine value and passes quality checks.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -25,6 +26,19 @@ BANNED_PHRASES = [
     "follow me",
     "great question",
 ]
+
+# Below this share of distinct words, a reply is mostly repetition
+MIN_DISTINCT_WORD_RATIO = 0.4
+# Shorter title/author/topic strings ("e", "an") would match almost any text
+MIN_REFERENCE_CHARS = 3
+
+
+def _mentions(text_lower: str, ref: str) -> bool:
+    """True if ``ref`` appears in the text as whole words, not inside a word."""
+    ref = ref.strip().lower()
+    if len(ref) < MIN_REFERENCE_CHARS:
+        return False
+    return re.search(rf"(?<!\w){re.escape(ref)}(?!\w)", text_lower) is not None
 
 
 @dataclass
@@ -172,9 +186,12 @@ class GrazerResponder:
         )
 
     def _score_response(self, text: str, post: DiscoveredPost) -> float:
-        """Score a response for quality.
+        """Score a response against a spam floor.
 
-        Checks word count, banned phrases, and specific references.
+        Checks length, banned phrases (each occurrence counts), repetition,
+        and that the text mentions the post's title, author or a topic. This
+        rejects boilerplate and filler; it is not a judgement of whether the
+        reply is correct or useful.
         """
         score = 1.0
         words = text.split()
@@ -186,15 +203,18 @@ class GrazerResponder:
 
         text_lower = text.lower()
         for phrase in BANNED_PHRASES:
-            if phrase in text_lower:
-                score -= 0.2
+            score -= 0.2 * text_lower.count(phrase)
+
+        # Padding a reply to length by repeating words ("lorem " * 50)
+        distinct = {w.strip(".,;:!?()\"'").lower() for w in words}
+        if words and len(distinct) / len(words) < MIN_DISTINCT_WORD_RATIO:
+            score -= 0.5
 
         if self.config.require_specific_reference:
-            has_reference = (
-                post.title.lower() in text_lower
-                or post.author.lower() in text_lower
-                or any(t.lower() in text_lower for t in post.topics)
-            )
+            # Whole-word matches of references of at least 3 characters, so
+            # empty or tiny fields ("", "e", "an") can't match any text
+            references = [post.title, post.author, *post.topics]
+            has_reference = any(_mentions(text_lower, ref) for ref in references)
             if not has_reference:
                 score -= 0.3
 

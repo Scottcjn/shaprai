@@ -2,7 +2,7 @@ name: mesh_agent_beta
 version: "1.0"
 description: "Mesh network responder — processes incoming messages and generates personality-driven replies"
 model:
-  base: "Qwen/Qwen3-7B-Instruct"
+  base: "Qwen/Qwen3-8B"
   quantization: q4_K_M
   min_vram_gb: 6
 personality:

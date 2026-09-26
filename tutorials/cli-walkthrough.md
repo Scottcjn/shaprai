@@ -20,7 +20,7 @@ Verify:
 
 ```bash
 $ shaprai --version
-shaprai, version 0.1.0
+shaprai, version 0.2.0
 ```
 
 ## Step 1: Create an Agent
@@ -51,20 +51,39 @@ What happens under the hood:
 
 The agent starts in `RAW` state — it can't be deployed yet.
 
-## Step 2: Train with SFT
+## Step 2: Train with SFT, then a preference method
 
-Supervised fine-tuning aligns the agent's behavior with the template persona.
+Training runs QLoRA on TRL and needs the training extra and, realistically, a CUDA GPU:
 
 ```bash
-$ shaprai train my-agent --phase sft --epochs 3
-Training 'my-agent' -- phase: sft, epochs: 3
-  [Epoch 1/3] loss: 2.341  ████████████████████ 100%
-  [Epoch 2/3] loss: 1.872  ████████████████████ 100%
-  [Epoch 3/3] loss: 1.654  ████████████████████ 100%
-Phase 'sft' complete for 'my-agent'.
+$ pip install 'shaprai[training]'
 ```
 
-You can generate training data from templates first:
+Supervised fine-tuning aligns the agent's behavior with the template persona. Check the data and configuration first with a dry run, which loads no model:
+
+```bash
+$ shaprai train my-agent --phase sft --dry-run
+$ shaprai train my-agent --phase sft --epochs 3
+Training 'my-agent' -- phase: sft, epochs: 3
+...
+Phase 'sft' complete for 'my-agent'.
+  Adapter:     ~/.shaprai/agents/my-agent/checkpoints/sft/adapter
+  Train loss:  ...
+```
+
+Without `--data`, training uses the seed corpus if one is installed (it ships separately; see `SHAPRAI_SEED_DIR` in the README), personalized with your agent's persona. To grow persona-specific data, distill it from a stronger teacher model behind any OpenAI-compatible API:
+
+```bash
+$ shaprai synthesize my-agent --teacher-endpoint https://api.example.com/v1 --teacher-model <model> --count 300
+Synthesized data for 'my-agent'
+  Prompts:  ...
+  SFT:      kept .../... -> ~/.shaprai/agents/my-agent/data/synth_sft.jsonl
+  Pairs:    kept .../... -> ~/.shaprai/agents/my-agent/data/synth_pairs.jsonl
+```
+
+The next `shaprai train` run picks these files up automatically. Skim a sample before training; a teacher's mistakes become your agent's habits.
+
+You can also generate simple template-based data:
 
 ```bash
 $ shaprai generate-sft --template templates/sophia_elya.yaml --output data/sophia_sft.jsonl --count 1000
@@ -77,23 +96,37 @@ Then pass it to training:
 $ shaprai train my-agent --phase sft --data data/sophia_sft.jsonl
 ```
 
-## Step 3: DriftLock Evaluation
-
-Before the Sanctuary, run a DriftLock coherence test to check if the agent maintains its identity under adversarial prompting:
-
-```bash
-$ shaprai train my-agent --phase driftlock
-Training 'my-agent' -- phase: driftlock, epochs: 3
-DriftLock score: 0.9231
-PASSED -- Identity coherence maintained.
-Phase 'driftlock' complete for 'my-agent'.
-```
-
-If it fails, run DPO training to reinforce identity boundaries:
+Next, run one preference method on top of the SFT adapter. `dpo` is the default choice; `kto`, `orpo` and `simpo` are alternatives (see [docs/RESEARCH.md](../docs/RESEARCH.md)):
 
 ```bash
 $ shaprai train my-agent --phase dpo --data data/identity_pairs.jsonl
 ```
+
+Per-agent hyperparameters can go in the template under `training:`, for example `training: {dpo: {loss_type: [apo_zero]}, sft: {use_dora: true}}`.
+
+## Step 3: DriftLock Evaluation
+
+Before the Sanctuary, run a DriftLock coherence test against the trained agent. DriftLock talks to the agent through any OpenAI-compatible endpoint, so serve the adapter first, for example with vLLM:
+
+```bash
+$ vllm serve Qwen/Qwen3-8B --enable-lora \
+    --lora-modules my-agent=~/.shaprai/agents/my-agent/checkpoints/dpo/adapter
+```
+
+Then evaluate it:
+
+```bash
+$ shaprai train my-agent --phase driftlock --endpoint http://localhost:8000/v1
+DriftLock report for 'my-agent'
+  Method:       embedding
+  Drift score:  ... (threshold 0.15)
+  Flip rate:    ...
+PASSED -- Identity coherence maintained.
+```
+
+The drift score compares the agent's late replies under adversarial pressure with its own answers to neutral identity questions. The flip rate is the share of correct factual answers it abandons when the user pushes back. Without `--endpoint` nothing is measured, and the phase reports "not evaluated" instead of passing.
+
+If it fails, run another preference round to reinforce identity boundaries.
 
 ## Step 4: Sanctuary Education
 
@@ -166,7 +199,7 @@ $ shaprai fleet status
 ## The Full Lifecycle at a Glance
 
 ```
-RAW → SFT Training → DriftLock Check → Sanctuary → Graduate → Deploy
+RAW → SFT → Preference Training → DriftLock Check → Sanctuary → Graduate → Deploy
 ```
 
 Each step is a deliberate gate. ShaprAI doesn't let you skip steps — an ungraduated agent can't be deployed, and a model that fails DriftLock needs more DPO training before it enters the Sanctuary.

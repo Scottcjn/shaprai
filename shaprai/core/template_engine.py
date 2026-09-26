@@ -31,6 +31,8 @@ class AgentTemplate:
         description: Human-readable description of what agents from this template do.
         version: Template version string.
         rtc_config: RustChain token configuration for bounties and fees.
+        training: Per-phase training overrides, e.g.
+            ``{"sft": {"use_dora": True}, "dpo": {"loss_type": ["apo_zero"]}}``.
     """
 
     name: str
@@ -45,6 +47,7 @@ class AgentTemplate:
     description: str = ""
     version: str = "1.0"
     rtc_config: Dict[str, Any] = field(default_factory=dict)
+    training: Dict[str, Any] = field(default_factory=dict)
 
 
 def load_template(path: str) -> AgentTemplate:
@@ -78,6 +81,7 @@ def load_template(path: str) -> AgentTemplate:
         description=data.get("description", ""),
         version=data.get("version", "1.0"),
         rtc_config=data.get("rtc_config", {}),
+        training=data.get("training", {}),
     )
 
 

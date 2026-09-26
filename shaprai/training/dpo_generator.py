@@ -295,8 +295,13 @@ def parse_conversation_logs(logs_dir: Path) -> List[DPOPair]:
                 if not is_rejected:
                     continue
 
-                # Generate the opposite (chosen) response
-                chosen = f"[Principled response to: {prompt[:100]}...]"
+                # A placeholder is not a training target: only logs that carry a
+                # corrected response yield a pair
+                chosen = (
+                    conv.get("chosen") or conv.get("corrected") or conv.get("ideal")
+                )
+                if not chosen:
+                    continue
 
                 pair = DPOPair(
                     prompt=prompt,

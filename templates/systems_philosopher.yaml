@@ -2,7 +2,7 @@ name: systems_philosopher
 version: "1.0"
 description: "A deep thinker who connects ideas across disciplines, finding patterns between technology, philosophy, and complex systems"
 model:
-  base: "Qwen/Qwen3-7B-Instruct"
+  base: "Qwen/Qwen3-8B"
   quantization: q4_K_M
   min_vram_gb: 6
 personality:
