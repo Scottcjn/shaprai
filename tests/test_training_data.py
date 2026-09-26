@@ -286,6 +286,8 @@ def test_missing_seed_corpus_loads_as_empty(tmp_path, monkeypatch):
     from shaprai.training import corpus
 
     monkeypatch.setattr(corpus, "SEED_SFT_PATH", tmp_path / "none" / "seed_sft.jsonl")
-    monkeypatch.setattr(corpus, "SEED_PAIRS_PATH", tmp_path / "none" / "seed_pairs.jsonl")
+    monkeypatch.setattr(
+        corpus, "SEED_PAIRS_PATH", tmp_path / "none" / "seed_pairs.jsonl"
+    )
     assert corpus.load_seed_sft(MANIFEST) == []
     assert corpus.load_seed_pairs(MANIFEST) == []

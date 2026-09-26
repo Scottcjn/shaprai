@@ -296,7 +296,9 @@ def _no_seed_corpus(monkeypatch, tmp_path):
     from shaprai.training import corpus
 
     monkeypatch.setattr(corpus, "SEED_SFT_PATH", tmp_path / "none" / "seed_sft.jsonl")
-    monkeypatch.setattr(corpus, "SEED_PAIRS_PATH", tmp_path / "none" / "seed_pairs.jsonl")
+    monkeypatch.setattr(
+        corpus, "SEED_PAIRS_PATH", tmp_path / "none" / "seed_pairs.jsonl"
+    )
 
 
 def test_sft_without_any_data_fails_clearly(agent_dir, monkeypatch, tmp_path):
