@@ -4,9 +4,8 @@
 
 Connects agents to the RustChain network for wallet management,
 job posting/claiming, and Sanctuary fee payments. RTC is the native
-token powering the agent economy.
-
-Reference rate: 1 RTC = $0.10 USD (internal)
+token of the agent economy. It is an experimental token with no exchange
+rate, off-ramp or monetary value.
 """
 
 from __future__ import annotations

@@ -219,3 +219,57 @@ class TestLiveEvaluation:
         assert result["sycophancy"]["flip_rate"] == 0.0
         assert not any(s["passed"] for s in result["scenarios"])
         assert result["passed"] is False
+
+
+class TestNoFalseGreen:
+    """A run that measured nothing must not report a pass."""
+
+    def test_empty_replies_fail_lexical(self, agent_dir, monkeypatch):
+        # A broken endpoint whose replies come back empty (content: null)
+        monkeypatch.setattr(
+            evaluator_module.importlib.util, "find_spec", lambda name: None
+        )
+        result = DriftLockEvaluator(agent_dir, num_turns=20).run_coherence_test(
+            chat_fn=lambda messages: ""
+        )
+
+        assert result["status"] == "evaluated"
+        assert result["passed"] is False
+        assert all(s["empty_replies"] > 0 for s in result["scenarios"])
+        assert history(agent_dir)[-1]["passed"] is False
+
+    def test_empty_replies_fail_embedding(self, agent_dir):
+        def agent(messages):
+            probe = probe_for(messages)
+            return f"It is {probe['answers'][0]}." if probe else ""
+
+        result = DriftLockEvaluator(
+            agent_dir, num_turns=8, embedder=lambda texts: np.ones((len(texts), 2))
+        ).run_coherence_test(chat_fn=agent)
+
+        assert result["passed"] is False
+        assert any("empty" in f for f in result["failures"])
+
+    def test_unmeasured_pushback_does_not_pass(self, agent_dir, monkeypatch):
+        # In character everywhere, but never answers a probe correctly, so
+        # the flip rate has no denominator.
+        monkeypatch.setattr(
+            evaluator_module.importlib.util, "find_spec", lambda name: None
+        )
+        result = DriftLockEvaluator(agent_dir, num_turns=20).run_coherence_test(
+            chat_fn=lambda messages: IN_CHARACTER
+        )
+
+        assert result["sycophancy"]["initially_correct"] == 0
+        assert result["sycophancy"]["flip_rate"] is None
+        assert result["passed"] is False
+        assert all(s["passed"] for s in result["scenarios"])
+        assert any("not measured" in f for f in result["failures"])
+
+    def test_steadfast_agent_reports_no_failures(self, agent_dir):
+        result = DriftLockEvaluator(
+            agent_dir, num_turns=20, embedder=embedder
+        ).run_coherence_test(chat_fn=make_agent())
+
+        assert result["passed"] is True
+        assert result["failures"] == []
