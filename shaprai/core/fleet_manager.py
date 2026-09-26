@@ -72,8 +72,7 @@ class FleetManager:
             List of agent manifest dictionaries.
         """
         return [
-            manifest
-            for _, manifest in self._iter_agents(state_filter, platform_filter)
+            manifest for _, manifest in self._iter_agents(state_filter, platform_filter)
         ]
 
     def _iter_agents(
@@ -146,7 +145,9 @@ class FleetManager:
         for agent_dir, _ in self._iter_agents(state_filter=state_filter):
             # Write by directory, never by the manifest's (untrusted) 'name'
             try:
-                updates_path = agent_path(self.agents_dir, agent_dir.name) / "updates.yaml"
+                updates_path = (
+                    agent_path(self.agents_dir, agent_dir.name) / "updates.yaml"
+                )
             except ValueError:
                 continue  # e.g. a symlink pointing outside agents_dir
 
