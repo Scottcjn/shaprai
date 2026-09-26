@@ -190,7 +190,7 @@ RIP-302 Agent Economy:
 RIP-303 RTC Gas:
   Network operations cost small RTC fees. Sanctuary enrollment: 0.01 RTC. Graduation: 0.05 RTC. Job posting: 0.001 RTC. Fees fund network operations and the reward pool.
 
-RTC Reference Rate: 1 RTC = $0.10 USD (internal reference).
+RTC is an experimental token: it has no exchange rate, off-ramp or monetary value.
 Total Supply: 8,388,608 RTC (2^23).
 
 Default RustChain node: https://50.28.86.131
